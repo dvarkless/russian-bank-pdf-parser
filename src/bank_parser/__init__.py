@@ -1,0 +1,28 @@
+"""Parse Russian bank exports into a canonical transaction CSV.
+
+Public API::
+
+    from bank_parser import Transaction, read_table, write_transactions
+    from bank_parser import detect_bank, get_parser
+"""
+
+from __future__ import annotations
+
+from .banks import detect_bank, get_parser, supported_banks
+from .models import Transaction
+from .readers import read_table
+from .writers import HEADER, write_transactions
+
+__version__ = "0.1.0"
+"""Package version (kept in sync with ``pyproject.toml``)."""
+
+__all__ = [
+    "HEADER",
+    "Transaction",
+    "__version__",
+    "detect_bank",
+    "get_parser",
+    "read_table",
+    "supported_banks",
+    "write_transactions",
+]
