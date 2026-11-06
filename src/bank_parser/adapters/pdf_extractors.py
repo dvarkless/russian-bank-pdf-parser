@@ -1,11 +1,13 @@
-"""PDF text extraction strategies (pdfplumber primary, pypdf fallback).
+"""PDF table and text extraction strategies (pdfplumber, pypdf fallback).
 
 pdfplumber and pypdf are imported lazily inside :meth:`extract` so importing
-:mod:`bank_parser` or running ``--help`` never loads either library.  Each
-extractor returns a :class:`~bank_parser.domain.raw.RawText` of
+:mod:`bank_parser` or running ``--help`` never loads either library.  The text
+extractors return a :class:`~bank_parser.domain.raw.RawText` of
 :class:`~bank_parser.domain.raw.RawLine` objects with 1-based page and line
-numbers, and raises :class:`~bank_parser.errors.NoExtractableContentError`
-instead of returning an empty document.
+numbers; the table extractor returns a
+:class:`~bank_parser.domain.raw.RawTable`.  Every extractor raises
+:class:`~bank_parser.errors.NoExtractableContentError` instead of returning an
+empty document.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import ClassVar
 
-from ..domain.raw import PdfDocument, RawLine, RawText
+from ..domain.raw import PdfDocument, RawLine, RawRow, RawTable, RawText
 from ..errors import (
     ExtractionError,
     NoExtractableContentError,
@@ -25,6 +27,7 @@ from ..ports.extraction import PdfExtractor
 
 __all__ = [
     "FallbackExtractor",
+    "PdfPlumberTableExtractor",
     "PdfPlumberTextExtractor",
     "PypdfTextExtractor",
 ]
@@ -40,6 +43,103 @@ def _page_lines(
         RawLine(text=line, page=page, line=line_number)
         for line_number, line in enumerate(text.splitlines(), start=1)
     )
+
+
+class PdfPlumberTableExtractor:
+    """Extract table rows with pdfplumber, one page at a time.
+
+    Every table returned for a page is flattened in extraction order.  Rows
+    keep their 1-based page and their 1-based position within that page's
+    flattened table rows; ``None`` cells become empty strings.  A document
+    without any table rows raises
+    :class:`~bank_parser.errors.NoExtractableContentError`.
+    """
+
+    name: ClassVar[str] = "pdfplumber-table"
+
+    def extract(self, document: PdfDocument) -> RawTable:
+        """Extract table rows from *document*.
+
+        Args:
+            document: Acquired PDF document; its path is opened here.
+
+        Returns:
+            Raw table rows with 1-based page and physical-row numbers.
+
+        Raises:
+            OSError: If the PDF file cannot be opened or read.
+            PdfEncryptedError: If the PDF is encrypted.
+            PdfOpenError: If pdfplumber cannot parse the PDF structure.
+            ExtractionError: If a page's table extraction fails.
+            NoExtractableContentError: If no table rows are found.
+        """
+        source = Path(document.path)
+
+        import pdfplumber
+        from pdfminer.pdfdocument import (
+            PDFEncryptionError,
+            PDFPasswordIncorrect,
+        )
+        from pdfplumber.utils.exceptions import (
+            MalformedPDFException,
+            PdfminerException,
+        )
+
+        rows: list[RawRow] = []
+        page_count = 0
+        try:
+            with pdfplumber.open(str(source)) as pdf:
+                page_count = len(pdf.pages)
+                for page_number, page in enumerate(pdf.pages, start=1):
+                    try:
+                        tables = page.extract_tables() or []
+                    except OSError:
+                        raise
+                    except (PdfminerException, MalformedPDFException) as exc:
+                        raise ExtractionError(
+                            f"{source} page {page_number}: {self.name} "
+                            f"table extraction failed: {exc}"
+                        ) from exc
+                    physical_row = 0
+                    for table in tables:
+                        for raw_row in table or ():
+                            if raw_row is None:
+                                continue
+                            physical_row += 1
+                            rows.append(
+                                RawRow(
+                                    cells=tuple(
+                                        "" if cell is None else str(cell)
+                                        for cell in raw_row
+                                    ),
+                                    page=page_number,
+                                    physical_row=physical_row,
+                                )
+                            )
+        except OSError:
+            raise
+        except PdfminerException as exc:
+            original = exc.args[0] if exc.args else exc
+            if isinstance(
+                original, (PDFEncryptionError, PDFPasswordIncorrect)
+            ):
+                raise PdfEncryptedError(
+                    f"{source}: PDF is encrypted ({self.name})"
+                ) from exc
+            raise PdfOpenError(
+                f"{source}: cannot open PDF with {self.name}: {original}"
+            ) from exc
+        except MalformedPDFException as exc:
+            raise PdfOpenError(
+                f"{source}: cannot open PDF with {self.name}: {exc}"
+            ) from exc
+
+        if not rows:
+            raise NoExtractableContentError(
+                f"{source}: no extractable tables in {page_count} page(s) "
+                f"with {self.name}"
+            )
+        return RawTable(rows=tuple(rows), source=document.source)
 
 
 class PdfPlumberTextExtractor:

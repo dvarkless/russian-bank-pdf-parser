@@ -15,6 +15,7 @@ from ..domain.models import Transaction
 from ..errors import UnsupportedBankError
 from ..ports.adapter import BankAdapter
 from .alfa_csv import AlfaCsvAdapter
+from .ozon_pdf import OzonPdfAdapter
 from .sber_csv import SberCsvAdapter
 from .sber_pdf import SberPdfAdapter
 from .tbank_csv import TbankCsvAdapter
@@ -34,6 +35,7 @@ BANK_ADAPTERS: tuple[type[BankAdapter], ...] = (
     SberCsvAdapter,
     AlfaCsvAdapter,
     SberPdfAdapter,
+    OzonPdfAdapter,
 )
 
 #: Canonical names of the banks this build can parse.
