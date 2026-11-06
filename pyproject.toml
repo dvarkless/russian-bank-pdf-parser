@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,14 +7,17 @@ name = "bank-parser"
 version = "0.1.0"
 description = "Convert Russian bank export files into a canonical transaction CSV."
 readme = "README.md"
-license = { text = "MIT" }
-requires-python = ">=3.10"
-dependencies = []
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=3.1,<4",
+    "pdfplumber>=0.11.10,<0.12",
+    "pypdf>=7,<8",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Operating System :: OS Independent",
-    "License :: OSI Approved :: MIT License",
 ]
 
 [project.scripts]

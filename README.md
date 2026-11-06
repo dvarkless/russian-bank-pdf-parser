@@ -2,18 +2,20 @@
 
 Convert Russian bank export files into a single, clean canonical transaction CSV.
 
-`bank-parser` is a small, standard-library-only Python CLI. It reads a bank's
-export file, maps it through a per-bank adapter into a common `Transaction`
-model, and writes one canonical CSV that is easy to load into a spreadsheet,
-database, or accounting tool.
+`bank-parser` is a small Python CLI with a deliberately narrow dependency set.
+It reads a bank's export file, maps it through a per-bank adapter into a common
+`Transaction` model, and writes one canonical CSV that is easy to load into a
+spreadsheet, database, or accounting tool.
 
-The tool is deliberately boring: no pandas, no network access, no binary
-floats for money (`decimal.Decimal` only), and no hidden state. The output is
-byte-for-byte deterministic for a given input.
+The tool is deliberately boring: no network access, no binary floats for money
+(`decimal.Decimal` only), and no hidden state. `pandas` is confined to tabular
+transport, while PDF statements are read with `pdfplumber` (and `pypdf` as a
+fallback). The output is byte-for-byte deterministic for a given input.
 
-> Status: the **T-Bank** adapter is the only bank implemented so far. The
-> adapter registry is designed to be extended; any other bank is unsupported
-> today and will be rejected with a clear error.
+> Status: the **T-Bank** CSV adapter is the only bank implemented so far. The
+> adapter registry is designed to be extended (other CSV banks and PDF
+> statements); any other bank is unsupported today and will be rejected with a
+> clear error.
 
 ---
 
@@ -85,17 +87,42 @@ sorted, filtered, deduplicated, or dropped — not even by `Статус` or
 
 ## Requirements
 
-- Python **3.10+** (developed and tested on 3.14).
-- **Standard library only** — no third-party runtime dependencies.
+- Python **3.11+** (developed and tested on 3.14).
+- Runtime dependencies (installed automatically by `pip install -e .`):
+  - `pandas>=3.1,<4` — tabular CSV/table transport;
+  - `pdfplumber>=0.11.10,<0.12` — PDF table/text extraction;
+  - `pypdf>=7,<8` — PDF page/text/metadata fallback.
+- A local virtual environment is recommended (`.venv/`, already gitignored).
 
 ---
 
 ## Install and run
 
-### Run from the source tree (no install)
+### Create the virtual environment
 
 ```bash
-PYTHONPATH=src python3 -m bank_parser \
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/pip install -e .
+```
+
+`pip install -e .` installs the runtime dependencies from
+[`pyproject.toml`](pyproject.toml). An equivalent explicit list is kept in
+[`requirements.txt`](requirements.txt) for environments that prefer
+`pip install -r requirements.txt`.
+
+### Run as a console script
+
+```bash
+.venv/bin/bank-parser -i data/input/T-Банк.csv -o out.csv
+```
+
+The installed entry point is `bank-parser = bank_parser.cli:main`.
+
+### Run from the source tree without installing
+
+```bash
+PYTHONPATH=src .venv/bin/python -m bank_parser \
     -i data/input/T-Банк.csv \
     -o out.csv
 ```
@@ -104,20 +131,11 @@ PYTHONPATH=src python3 -m bank_parser \
 from the filename or from its header columns); pass it explicitly to be safe:
 
 ```bash
-PYTHONPATH=src python3 -m bank_parser \
+.venv/bin/bank-parser \
     -i data/input/T-Банк.csv \
     -o out.csv \
     --bank tbank
 ```
-
-### Install as a console script
-
-```bash
-pip install -e .
-bank-parser -i data/input/T-Банк.csv -o out.csv
-```
-
-The installed entry point is `bank-parser = bank_parser.cli:main`.
 
 ### Behaviour
 
@@ -131,7 +149,8 @@ The installed entry point is `bank-parser = bank_parser.cli:main`.
 ## Project layout
 
 ```text
-pyproject.toml              # packaging + console-script entry point
+pyproject.toml              # packaging, runtime dependencies, console script
+requirements.txt            # explicit dependency list (optional alternative)
 README.md                   # this file
 .gitignore
 LICENSE
@@ -147,10 +166,14 @@ src/bank_parser/
         tbank.py            # T-Bank adapter (header mapping, date/amount parsing)
 scripts/
     verify.py               # optional QA comparison harness (not a unit-test suite)
+docs/                       # local-only notes: spec.md, architecture.md, code_style.md
+.venv/                      # local virtual environment (gitignored)
 ```
 
-`data/`, `docs/`, `.mnemon/`, `tmp/` and Python caches are local-only and are
-excluded by `.gitignore`; they are never committed.
+`data/`, `docs/`, `.mnemon/`, `tmp/`, `.venv/` and Python caches are local-only
+and are excluded by `.gitignore`; they are never committed. The architecture and
+code-style notes for the multi-format (CSV + PDF) design live under `docs/` for
+local reference.
 
 ---
 
