@@ -9,14 +9,14 @@ spreadsheet, database, or accounting tool.
 
 The tool is deliberately boring: no network access, no binary floats for money
 (`decimal.Decimal` only), and no hidden state. `pandas` is confined to tabular
-CSV/table transport, and the PDF extraction path is built on `pdfplumber` (with
-`pypdf` as a fallback) even though no PDF adapter is registered yet. The output
+CSV/table transport, and PDF statements are extracted with `pdfplumber` text
+extraction (`pypdf` extraction is available as a fallback strategy). The output
 is byte-for-byte deterministic for a given input.
 
-> Status: three CSV adapters are implemented — **T-Bank CSV**, **Sber CSV** and
-> **Alfa-Bank CSV**. PDF statements are the next milestone: the extraction
-> infrastructure is in place, but no PDF bank adapter is registered yet, so PDF
-> input is rejected with a clear error.
+> Status: four adapters are implemented — **T-Bank CSV**, **Sber CSV**,
+> **Alfa-Bank CSV** and **Sber PDF**. The **Ozon PDF** statement is the remaining
+> adapter; until that adapter is registered, Ozon PDF input is rejected with a
+> clear detection error.
 
 ---
 
@@ -43,30 +43,39 @@ is byte-for-byte deterministic for a given input.
 | T-Bank     | T-Bank 17-column CSV export  | `tbank`      | 117          | Supported |
 | Sber       | Sber 17-column CSV export    | `sber-csv`   | 16           | Supported |
 | Alfa-Bank  | Alfa 16-column English CSV   | `alfa`       | 96           | Supported |
+| Sber       | Sber PDF statement           | `sber-pdf`   | 50           | Supported |
 
-PDF statements are **not** supported yet: the extraction infrastructure exists,
-but no PDF bank adapter is registered.
+The **Ozon PDF** statement is not supported yet: its adapter is the remaining
+milestone, so `data/input/Ozon.pdf` fails detection with a clear error.
 
 Supported aliases for the `--bank` option (case-insensitive):
 
 | Bank       | Aliases |
 |------------|---------|
 | T-Bank     | `tbank`, `t-bank`, `т-банк`, `т банк` |
-| Sber       | `sber-csv`, `sber`, `сбер`, `сбербанк` |
+| Sber       | `sber-csv`, `sber-pdf`, `sber`, `сбер`, `сбербанк` |
 | Alfa-Bank  | `alfa`, `alpha`, `альфа`, `альфа-банк` |
+
+`сбер` / `sber` / `сбербанк` are shared by the Sber CSV and Sber PDF adapters;
+they resolve by input format (`.csv` → `sber-csv`, `.pdf` → `sber-pdf`).
 
 ### Bank detection
 
-Detection is **filename-first**, then header-signature based:
+Detection is **filename-first**, then content-signature based:
 
 - `tbank` / `t-bank` / `т-банк`, `sber` / `сбер` / `сбербанк`, and
   `alfa` / `alpha` / `альфа` in the filename select the adapter at high
   confidence (90).
 - With a neutral filename, a distinctive **English Alfa header**
   (`operationDate`, `merchant`, `amount`, `type`) resolves to `alfa`.
+- With a neutral filename, a **Sber PDF body signature** on the first page
+  (`Выписка по платёжному счёту` and `СберБанк`) resolves to `sber-pdf` at
+  confidence 85.
 - A neutral **17-column Russian header** is shared by the T-Bank and Sber CSV
   exports, so it is deliberately ambiguous: the registry raises a detection
   error and asks for `--bank` instead of guessing.
+- Ozon PDF is not registered yet, so `Ozon.pdf` matches no adapter and fails
+  detection with an error listing the supported banks.
 
 Bank support lives behind a registry, so adding a new bank does not change the
 CLI or the canonical writer. See
@@ -106,6 +115,13 @@ date,merchant,amount,currency,category,type,comment,
 One data row is written per input transaction, in input order. Rows are not
 sorted, filtered, deduplicated, or dropped — not even by `Статус` /
 `Учёт в аналитике` (T-Bank/Sber) or `status` (Alfa).
+
+For the **Sber PDF** statement the values come from the line-oriented statement
+text: the operation date, category and signed amount from the operation header
+line; the merchant from the following description line (with the trailing
+`Операция по карте/счету ****dddd` suffix stripped); a `+` amount becomes
+`Пополнение` and any other amount `Списание`; the currency is `RUR` declared by
+the adapter; the comment is empty. The processing date is ignored.
 
 ---
 
@@ -152,14 +168,15 @@ PYTHONPATH=src .venv/bin/python -m bank_parser \
 ```
 
 `--bank` may be omitted when the file's bank can be auto-detected from its
-filename (or, for Alfa, from its distinctive header). Pass it explicitly when
-the filename is neutral, because the shared 17-column Russian header is
-ambiguous between T-Bank and Sber:
+filename (or, for Alfa and Sber PDF, from a content signature). Pass it
+explicitly when the filename is neutral, because the shared 17-column Russian
+header is ambiguous between T-Bank and Sber CSV:
 
 ```bash
 .venv/bin/bank-parser -i data/input/T-Банк.csv   -o out.csv --bank tbank
 .venv/bin/bank-parser -i data/input/Сбер_csv.csv -o out.csv --bank sber-csv
 .venv/bin/bank-parser -i data/input/Альфа.CSV    -o out.csv --bank alfa
+.venv/bin/bank-parser -i data/input/Сбер.pdf     -o out.csv --bank sber-pdf
 ```
 
 ### Behaviour
@@ -204,16 +221,18 @@ src/bank_parser/
         pipeline.py         # InputNormalizer, StatementValidator, CanonicalWriter
     adapters/
         csv_source.py       # pandas/stdlib CSV readers + CsvStatementSource
+        pdf_source.py       # PDF metadata acquisition (pypdf)
+        pdf_extractors.py   # pdfplumber/pypdf text extractors + fallback
         normalizers.py      # TableNormalizer, TextNormalizer
         validation.py       # DefaultStatementValidator
         writers.py          # CanonicalCsvWriter
         peeks.py            # cheap CSV/PDF detection signals
-        pdf_source.py       # PDF metadata acquisition (no PDF adapters yet)
     banks/
         __init__.py         # BANK_ADAPTERS, build_registry(), legacy facades
         tbank_csv.py        # TbankCsvMapper + TbankCsvAdapter
         sber_csv.py         # SberCsvAdapter (reuses TbankCsvMapper)
         alfa_csv.py         # AlfaCsvMapper + AlfaCsvAdapter
+        sber_pdf.py         # SberPdfMapper + SberPdfAdapter (line state machine)
         tbank.py            # legacy T-Bank facade (parse/parse_rows)
 scripts/
     verify.py               # optional QA comparison harness (not a unit-test suite)
@@ -268,9 +287,11 @@ not touch the pipeline, the writer or the CLI.
    the same confidence so a neutral filename ties and asks for `--bank` instead
    of guessing.
 
-3. PDF adapters additionally provide a `PdfExtractor` (pdfplumber / pypdf) and,
-   when needed, a custom normalizer or record predicate. The PDF source and
-   detection peeks already exist; register the adapter the same way.
+3. PDF adapters additionally provide a `PdfExtractor` from
+   `adapters/pdf_extractors.py` (`PdfPlumberTextExtractor`,
+   `PypdfTextExtractor`, or `FallbackExtractor`), plus a text normalizer and a
+   line/table mapper. The PDF source and detection peeks already exist; register
+   the adapter the same way.
 
 4. Try it explicitly first: `bank-parser ... --bank <bank>`. Add a QA
    comparison under `scripts/` if you have a trustworthy reference file.
@@ -306,10 +327,9 @@ not required to use the parser.
 
 ## Limitations and notes
 
-- **CSV adapters only: T-Bank, Sber and Alfa-Bank.** PDF statements are the
-  next milestone; the extraction infrastructure (sources, ports, pipeline,
-  detection) is in place, but no PDF adapter is registered, so PDF input is
-  rejected with a clear error.
+- **Supported adapters: T-Bank CSV, Sber CSV, Alfa-Bank CSV and Sber PDF.**
+  **Ozon PDF** is the remaining adapter and is not registered yet, so
+  `Ozon.pdf` is rejected with a clear detection error.
 - **A neutral 17-column Russian CSV header is ambiguous.** The T-Bank and Sber
   exports share the same header, so a file without a recognizable bank name in
   its filename must be converted with an explicit `--bank tbank` or
@@ -320,14 +340,24 @@ not required to use the parser.
   because the trailing empty `comment` and placeholder were omitted). The
   generated output is clean and canonical; the QA harness tolerates and
   explains such reference typos rather than treating them as parser bugs.
+- **The Sber PDF reference has six known manual discrepancies.** Compared with
+  the statement's own header lines, `data/output/Сбер.csv` has one wrong
+  category (row 8) and five wrong operation dates (rows 25, 28, 30, 31 and 41).
+  The generated Sber PDF output follows the operation date printed on the PDF
+  header, never the processing date; QA treats exactly these six differences as
+  explained reference typos.
 - The `Статус` / `Учёт в аналитике` columns are read but not used for filtering
   in this milestone: every input transaction is included.
-- The local CSV fixtures exercise only a subset of the tolerance rules above.
+- The local fixtures exercise only a subset of the tolerance rules above.
   Dot decimals, Unicode minus, thousands separators, alternative date formats,
   `cp1251`/tab/comma inputs, embedded delimiters/newlines, zero amounts and the
   currency/category fallbacks are implemented and were checked with synthetic
   inputs, but are not all present in the T-Bank fixture. The Alfa fixture does
   cover the explicit `type` column and the `transactionDate` fallback path.
+- **Sber PDF extraction is text-based.** `data/input/Сбер.pdf` is 3 pages and
+  pdfplumber finds no tables in it: the mapper is a line-oriented state machine
+  over page text. Text extraction requires `pdfplumber`; `pypdf` is only a
+  fallback and is not used for the supported Sber statement.
 - Output directories are not created automatically; the destination directory
   must exist.
 

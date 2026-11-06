@@ -12,9 +12,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..domain.models import Transaction
+from ..errors import UnsupportedBankError
 from ..ports.adapter import BankAdapter
 from .alfa_csv import AlfaCsvAdapter
 from .sber_csv import SberCsvAdapter
+from .sber_pdf import SberPdfAdapter
 from .tbank_csv import TbankCsvAdapter
 
 __all__ = [
@@ -31,6 +33,7 @@ BANK_ADAPTERS: tuple[type[BankAdapter], ...] = (
     TbankCsvAdapter,
     SberCsvAdapter,
     AlfaCsvAdapter,
+    SberPdfAdapter,
 )
 
 #: Canonical names of the banks this build can parse.
@@ -71,7 +74,8 @@ def get_parser(
         OSError: From the returned callable when the input cannot be read.
     """
     registry = build_registry()
-    registry.resolve_alias(name)
+    if not registry.has_alias(name):
+        raise UnsupportedBankError(name, registry.supported)
 
     def parse(path: str | Path) -> list[Transaction]:
         from ..cli import build_application

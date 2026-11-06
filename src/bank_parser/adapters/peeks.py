@@ -122,6 +122,7 @@ class PdfPlumberPdfPeek:
         try:
             import pdfplumber
             from pdfminer.pdfexceptions import PDFException
+            from pdfplumber.utils.exceptions import PdfminerException
         except ImportError:  # pragma: no cover - dependency is declared
             return None
 
@@ -132,7 +133,15 @@ class PdfPlumberPdfPeek:
                 return pdf.pages[0].extract_text() or ""
         except OSError:
             raise
-        except (PDFException, ValueError, TypeError, RuntimeError) as exc:
+        except (
+            PDFException,
+            PdfminerException,
+            ValueError,
+            TypeError,
+            RuntimeError,
+        ) as exc:
+            # pdfplumber wraps pdfminer failures (corrupt/encrypted PDFs) in
+            # PdfminerException, which is not a PDFException subclass.
             logger.debug("pdfplumber text peek failed for %s: %s", path, exc)
             return None
 

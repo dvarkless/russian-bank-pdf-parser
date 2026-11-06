@@ -190,6 +190,17 @@ class BankRegistry:
         """Canonical names of registered banks, sorted for stable output."""
         return tuple(sorted({adapter.name for adapter in self._adapters}))
 
+    def has_alias(self, name: str) -> bool:
+        """Return True when *name* is a registered bank name or alias.
+
+        Unlike :meth:`resolve_alias`, this does not choose between adapters
+        that share an alias across formats (for example ``sber`` for the CSV
+        and PDF adapters); it only answers whether the alias is known.
+        """
+        if not isinstance(name, str):
+            return False
+        return _normalize_alias(name) in self._alias_map
+
     def _alias_hint(self) -> str:
         """Return a deterministic supported-alias hint for error messages."""
         return f"(aliases: {', '.join(sorted(self._alias_map))})"
