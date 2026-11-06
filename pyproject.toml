@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bank-parser"
-version = "0.1.0"
+version = "1.0.0"
 description = "Convert Russian bank export files into a canonical transaction CSV."
 readme = "README.md"
 license = "MIT"
@@ -20,8 +20,18 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
 [project.scripts]
 bank-parser = "bank_parser.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+

@@ -15,7 +15,7 @@ from .models import Money, OperationType, Transaction
 from .readers import read_table
 from .writers import HEADER, write_transactions
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 """Package version (kept in sync with ``pyproject.toml``)."""
 
 _logger = logging.getLogger(__name__)

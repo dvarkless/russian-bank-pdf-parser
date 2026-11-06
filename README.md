@@ -1,154 +1,142 @@
-# bank-parser
+# bank-parser 1.0.0
 
-Convert Russian bank export files into a single, clean canonical transaction CSV.
+[English version](README.en.md) | **Русская версия**
 
-`bank-parser` is a small Python CLI with a deliberately narrow dependency set.
-It reads a bank's export file, maps it through a per-bank adapter into a common
-`Transaction` model, and writes one canonical CSV that is easy to load into a
-spreadsheet, database, or accounting tool.
+Преобразует выписки российских банков (CSV и PDF) в один канонический CSV-файл.
 
-The tool is deliberately boring: no network access, no binary floats for money
-(`decimal.Decimal` only), and no hidden state. `pandas` is confined to tabular
-CSV/table transport, and PDF statements are read with `pdfplumber` (text or
-table extraction, with `pypdf` text extraction available as a fallback
-strategy). The output is byte-for-byte deterministic for a given input.
+`bank-parser` — небольшой Python-CLI с минимальным набором зависимостей. Он
+читает файл выписки, пропускает его через адаптер конкретного банка в общую
+модель `Transaction` и записывает единый CSV, который удобно открыть в таблице,
+загрузить в базу или использовать в бухгалтерии.
 
-> Status: all five known inputs are supported — **T-Bank CSV**, **Sber CSV**,
-> **Alfa-Bank CSV**, **Sber PDF** and **Ozon PDF**. See
-> [Supported banks](#supported-banks) for details.
+Деньги обрабатываются только через `decimal.Decimal` (без двоичных чисел с
+плавающей точкой). `pandas` используется только как транспорт для табличных
+данных, PDF читаются через `pdfplumber` (таблицы и текст), `pypdf` доступен как
+резервный извлекатель текста. Для одного и того же входа результат
+детерминирован.
 
----
-
-## Features
-
-- Header-name based column resolution (column order in the export does not
-  matter; extra columns are ignored).
-- Encoding tolerance: tries `utf-8-sig`, `utf-8`, then `cp1251`.
-- Delimiter tolerance: `;`, `,` and tab, auto-detected from the header.
-- Standard CSV quoting, including quoted cells that contain the delimiter or
-  embedded newlines; CRLF and LF line endings both work.
-- Amount tolerance: decimal comma or dot, Unicode minus, NBSP/thin-space
-  thousands separators, optional currency symbols.
-- Bank auto-detection from the filename or a content signature (header/body
-  text), with an explicit `--bank` override.
-- Clear error messages that name the offending data row.
+> Статус: поддержаны все пять известных входных файлов — **T-Bank CSV**,
+> **Сбер CSV**, **Альфа-Банк CSV**, **Сбер PDF** и **Ozon PDF**. Подробности в
+> разделе [Поддерживаемые банки](#поддерживаемые-банки).
 
 ---
 
-## Supported banks
+## Возможности
 
-| Bank       | Input                        | Adapter name | Fixture rows | Status    |
-|------------|------------------------------|--------------|--------------|-----------|
-| T-Bank     | T-Bank 17-column CSV export  | `tbank`      | 117          | Supported |
-| Sber       | Sber 17-column CSV export    | `sber-csv`   | 16           | Supported |
-| Alfa-Bank  | Alfa 16-column English CSV   | `alfa`       | 96           | Supported |
-| Sber       | Sber PDF statement           | `sber-pdf`   | 50           | Supported |
-| Ozon       | Ozon PDF statement           | `ozon`       | 47           | Supported |
-
-All five inputs in `data/input/` are now supported.
-
-Supported aliases for the `--bank` option (case-insensitive):
-
-| Bank       | Aliases |
-|------------|---------|
-| T-Bank     | `tbank`, `t-bank`, `т-банк`, `т банк` |
-| Sber       | `sber-csv`, `sber-pdf`, `sber`, `сбер`, `сбербанк` |
-| Alfa-Bank  | `alfa`, `alpha`, `альфа`, `альфа-банк` |
-| Ozon       | `ozon`, `озон`, `ozon-bank` |
-
-`сбер` / `sber` / `сбербанк` are shared by the Sber CSV and Sber PDF adapters;
-they resolve by input format (`.csv` → `sber-csv`, `.pdf` → `sber-pdf`).
-
-### Bank detection
-
-Detection is **filename-first**, then content-signature based:
-
-- `tbank` / `t-bank` / `т-банк`, `sber` / `сбер` / `сбербанк`,
-  `alfa` / `alpha` / `альфа`, and `ozon` / `озон` in the filename select the
-  adapter at high confidence (90).
-- With a neutral filename, a distinctive **English Alfa header**
-  (`operationDate`, `merchant`, `amount`, `type`) resolves to `alfa`.
-- With a neutral filename, a **Sber PDF body signature** on the first page
-  (`Выписка по платёжному счёту` and `СберБанк`) resolves to `sber-pdf` at
-  confidence 85.
-- With a neutral filename, an **Ozon PDF body signature** on the first page
-  (`ООО «ОЗОН Банк` or `Справка о движении средств`) resolves to `ozon` at
-  confidence 85; the generic `Назначение платежа` heading resolves to `ozon`
-  at confidence 80.
-- A neutral **17-column Russian header** is shared by the T-Bank and Sber CSV
-  exports, so it is deliberately ambiguous: the registry raises a detection
-  error and asks for `--bank` instead of guessing.
-
-Bank support lives behind a registry, so adding a new bank does not change the
-CLI or the canonical writer. See
-[Adding a bank adapter](#adding-a-bank-adapter).
+- Поиск колонок по имени заголовка, а не по позиции: порядок колонок не важен,
+  лишние колонки игнорируются.
+- Терпимость к кодировкам: `utf-8-sig`, `utf-8`, `cp1251`.
+- Терпимость к разделителям: `;`, `,`, табуляция; определяется автоматически.
+- Стандартные кавычки CSV, включая поля с разделителем или переводом строки
+  внутри; поддерживаются CRLF и LF.
+- Терпимость к суммам: десятичная запятая или точка, юникодный минус, неразрывные
+  и тонкие пробелы в тысячах, символы валют.
+- Автоопределение банка по имени файла или сигнатуре содержимого (заголовок
+  CSV / текст первой страницы PDF); можно указать банк явно через `--bank`.
+- Понятные ошибки с указанием файла, страницы и номера строки.
 
 ---
 
-## Canonical output format
+## Поддерживаемые банки
 
-Every output file is written in exactly this format:
+| Банк | Вход | Имя адаптера | Строк в фикстуре | Статус |
+|---|---|---|---|---|
+| T-Bank | CSV-выписка, 17 колонок | `tbank` | 117 | Поддержан |
+| Сбер | CSV-выписка, 17 колонок | `sber-csv` | 16 | Поддержан |
+| Альфа-Банк | CSV-выписка, 16 английских колонок | `alfa` | 96 | Поддержан |
+| Сбер | PDF-выписка | `sber-pdf` | 50 | Поддержан |
+| Ozon | PDF-выписка | `ozon` | 47 | Поддержан |
 
-| Property        | Value                                                              |
-|-----------------|--------------------------------------------------------------------|
-| Encoding        | UTF-8 **with BOM** (`utf-8-sig`)                                   |
-| Line endings    | `\n` (LF), no trailing whitespace, single final newline            |
-| Delimiter       | `,`                                                                |
-| Columns         | 8 fields, header row first                                         |
+Все пять файлов из `data/input/` поддерживаются.
 
-Header row (note the trailing comma: the 8th field is an always-empty
-placeholder that matches the established template):
+Псевдонимы для `--bank` (регистр не важен):
+
+| Банк | Псевдонимы |
+|---|---|
+| T-Bank | `tbank`, `t-bank`, `т-банк`, `т банк` |
+| Сбер | `sber-csv`, `sber-pdf`, `sber`, `сбер`, `сбербанк` |
+| Альфа-Банк | `alfa`, `alpha`, `альфа`, `альфа-банк` |
+| Ozon | `ozon`, `озон`, `ozon-bank` |
+
+Псевдонимы `сбер` / `sber` / `сбербанк` общие для CSV- и PDF-адаптеров Сбера:
+формат определяется по расширению файла (`.csv` → `sber-csv`,
+`.pdf` → `sber-pdf`).
+
+### Определение банка
+
+Банк определяется в таком порядке: имя файла (высокая уверенность), сигнатура
+содержимого (текст первой страницы PDF или заголовок CSV), затем слабые
+признаки. Если имя файла нейтральное, а заголовок CSV совпадает у T-Bank и
+Сбера (одинаковые 17 колонок), адаптер не угадывает: выбрасывается
+`DetectionError` с просьбой указать `--bank tbank` или `--bank sber-csv`.
+
+Добавление нового банка не меняет CLI и канонический writer — см.
+[Добавление адаптера банка](#добавление-адаптера-банка).
+
+---
+
+## Канонический формат вывода
+
+Каждый выходной файл записывается строго так:
+
+| Свойство | Значение |
+|---|---|
+| Кодировка | UTF-8 **с BOM** (`utf-8-sig`) |
+| Переводы строк | `\n` (LF), без хвостовых пробелов, один финальный перевод строки |
+| Разделитель | `,` |
+| Колонки | 8 полей, первой идёт строка заголовка |
+
+Строка заголовка (обратите внимание на запятую в конце: 8-е поле — всегда пустой
+заполнитель, соответствующий установленному шаблону):
 
 ```text
 date,merchant,amount,currency,category,type,comment,
 ```
 
-| Column     | Source / rule |
-|------------|---------------|
-| `date`     | Operation date, `DD/MM/YYYY` (T-Bank/Sber `Дата операции`; Alfa `operationDate`, falling back to `transactionDate` only when it is blank) |
-| `merchant` | Description text (T-Bank/Sber `Описание`; Alfa `merchant`) |
-| `amount`   | **Absolute** value, exactly 2 decimal digits, `.` separator (T-Bank/Sber signed `Сумма операции`; Alfa positive `amount` with the sign taken from `type`) |
-| `currency` | T-Bank/Sber `Валюта операции`, falling back to `Валюта счёта`; Alfa `currency` (e.g. `RUR`), preserved and never converted |
-| `category` | T-Bank/Sber `Категория по-умолчанию`, falling back to `Ваша категория`; Alfa `category` |
-| `type`     | `Списание` / `Пополнение` — derived from the signed amount for T-Bank/Sber and from the explicit `type` column for Alfa; zero amounts are `Списание` |
-| `comment`  | T-Bank/Sber `Сообщение`; Alfa `comment` (may be empty) |
-| (8th)      | Always empty (trailing comma) |
+| Колонка | Источник / правило |
+|---|---|
+| `date` | Дата операции `DD/MM/YYYY` (T-Bank/Сбер — `Дата операции`; Альфа — `operationDate`, `transactionDate` только если первая пустая) |
+| `merchant` | Описание (T-Bank/Сбер — `Описание`; Альфа — `merchant`) |
+| `amount` | **Абсолютная** сумма, ровно 2 знака после точки, разделитель `.` (T-Bank/Сбер — знаковая `Сумма операции`; Альфа — положительная `amount`, знак берётся из `type`) |
+| `currency` | T-Bank/Сбер — `Валюта операции`, иначе `Валюта счёта`; Альфа — `currency` (например, `RUR`), без конвертации |
+| `category` | T-Bank/Сбер — `Категория по-умолчанию`, иначе `Ваша категория`; Альфа — `category` |
+| `type` | `Списание` / `Пополнение`: по знаку суммы у T-Bank/Сбера, по явной колонке `type` у Альфы; ноль считается `Списание` |
+| `comment` | T-Bank/Сбер — `Сообщение`; Альфа — `comment` (может быть пустым) |
+| 8-е поле | Всегда пустое (запятая в конце) |
 
-One data row is written per input transaction, in input order. Rows are not
-sorted, filtered, deduplicated, or dropped — not even by `Статус` /
-`Учёт в аналитике` (T-Bank/Sber) or `status` (Alfa).
+На каждую входную операцию пишется одна строка в исходном порядке. Сортировка,
+фильтрация, дедупликация и отбрасывание строк не выполняются — даже по
+`Статус` / `Учёт в аналитике` (T-Bank/Сбер) или `status` (Альфа).
 
-For the **Sber PDF** statement the values come from the line-oriented statement
-text: the operation date, category and signed amount from the operation header
-line; the merchant from the following description line (with the trailing
-`Операция по карте/счету ****dddd` suffix stripped); a `+` amount becomes
-`Пополнение` and any other amount `Списание`; the currency is `RUR` declared by
-the adapter; the comment is empty. The processing date is ignored.
+**Сбер PDF.** Значения берутся из текста выписки: дата операции, категория и
+знаковая сумма — из строки-заголовка операции; merchant — из следующей строки
+описания (суффикс `Операция по карте/счету ****dddd` отбрасывается); сумма со
+знаком `+` → `Пополнение`, любая другая → `Списание`; валюта `RUR` объявлена
+адаптером; комментарий пустой. Дата обработки игнорируется.
 
-For the **Ozon PDF** statement the values come from the pdfplumber table
-(5 columns): the operation timestamp in column 0 (time dropped); the signed
-amount in column 3, cross-checked against the account-currency amount in
-column 4 when that cell is non-empty; the category and merchant from ordered
-`Назначение платежа` purpose rules on column 2 (SBP transfer recipient,
-own-funds transfer, Ozon platform payment, card payment, tips); the currency is
-`RUR` declared by the adapter; the comment is empty.
+**Ozon PDF.** Значения берутся из таблицы pdfplumber (5 колонок): отметка
+времени в колонке 0 (время отбрасывается); знаковая сумма в колонке 3,
+сверяется с суммой в валюте счёта в колонке 4, если она непустая; категория и
+merchant — по упорядоченным правилам для `Назначение платежа` в колонке 2
+(перевод через СБП, перевод собственных средств, оплата на платформе Ozon,
+оплата картой, чаевые); валюта `RUR` объявлена адаптером; комментарий пустой.
 
 ---
 
-## Requirements
+## Требования
 
-- Python **3.11+** (developed and tested on 3.14).
-- Runtime dependencies (installed automatically by `pip install -e .`):
-  - `pandas>=3.1,<4` — tabular CSV/table transport;
-  - `pdfplumber>=0.11.10,<0.12` — PDF table/text extraction;
-  - `pypdf>=7,<8` — PDF page/text/metadata fallback.
-- A local virtual environment is recommended (`.venv/`, already gitignored).
+- Python **3.11+** (разработано и проверено на 3.14).
+- Зависимости времени выполнения (ставятся через `pip install -e .`):
+  - `pandas>=3.1,<4` — табличный транспорт CSV/таблиц;
+  - `pdfplumber>=0.11.10,<0.12` — извлечение таблиц и текста из PDF;
+  - `pypdf>=7,<8` — резервное чтение страниц/текста/метаданных PDF.
+- Рекомендуется локальное виртуальное окружение (`.venv/`, уже в `.gitignore`).
 
 ---
 
-## Install and run
+## Установка и запуск
 
-### Create the virtual environment
+### Создание виртуального окружения
 
 ```bash
 python3 -m venv .venv
@@ -156,20 +144,28 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
-`pip install -e .` installs the runtime dependencies from
-[`pyproject.toml`](pyproject.toml). An equivalent explicit list is kept in
-[`requirements.txt`](requirements.txt) for environments that prefer
-`pip install -r requirements.txt`.
+`pip install -e .` ставит зависимости из [`pyproject.toml`](pyproject.toml).
+Их же можно поставить из [`requirements.txt`](requirements.txt):
 
-### Run as a console script
+```bash
+.venv/bin/pip install -r requirements.txt
+```
+
+Для запуска тестов установите dev-дополнение:
+
+```bash
+.venv/bin/pip install -e ".[dev]"
+```
+
+### Запуск как консольная команда
 
 ```bash
 .venv/bin/bank-parser -i data/input/T-Банк.csv -o out.csv
 ```
 
-The installed entry point is `bank-parser = bank_parser.cli:main`.
+Установленная точка входа: `bank-parser = bank_parser.cli:main`.
 
-### Run from the source tree without installing
+### Запуск из исходников без установки
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m bank_parser \
@@ -177,10 +173,8 @@ PYTHONPATH=src .venv/bin/python -m bank_parser \
     -o out.csv
 ```
 
-`--bank` may be omitted when the file's bank can be auto-detected from its
-filename (or, for Alfa and the PDF adapters, from a content signature). Pass it
-explicitly when the filename is neutral, because the shared 17-column Russian
-header is ambiguous between T-Bank and Sber CSV:
+Если имя файла не содержит названия банка, укажите его явно. Общий 17-колоночный
+заголовок T-Bank и Сбера неоднозначен:
 
 ```bash
 .venv/bin/bank-parser -i data/input/T-Банк.csv   -o out.csv --bank tbank
@@ -190,83 +184,93 @@ header is ambiguous between T-Bank and Sber CSV:
 .venv/bin/bank-parser -i data/input/Ozon.pdf     -o out.csv --bank ozon
 ```
 
-### Behaviour
+### Поведение
 
-- On success the tool prints a one-line summary (`N transactions -> PATH`) and
-  exits `0`.
-- On failure it prints a clear message to stderr and exits non-zero.
-- `--version` prints the package version.
+- При успехе печатается строка `N transactions -> PATH`, код возврата `0`.
+- При ошибке печатается понятное сообщение в stderr, код возврата ненулевой.
+- `--version` печатает версию пакета, `--help` — справку.
+- Каталог для выходного файла должен существовать: writer его не создаёт.
 
 ---
 
-## Project layout
+## Структура проекта
 
 ```text
-pyproject.toml              # packaging, runtime dependencies, console script
-requirements.txt            # explicit dependency list (optional alternative)
-README.md                   # this file
+pyproject.toml              # упаковка, runtime/dev-зависимости, консольная команда
+requirements.txt            # явный список runtime-зависимостей
+README.md                   # русская документация (по умолчанию)
+README.en.md                # английская документация
 .gitignore
 LICENSE
 src/bank_parser/
-    __init__.py             # public API re-exports + version + NullHandler
-    __main__.py             # python -m bank_parser entry point
-    cli.py                  # argparse + composition root
-    application.py          # Application use-case facade (convert/read)
-    pipeline.py             # StatementPipeline Template Method (CSV/PDF)
-    registry.py             # BankRegistry, Source/Pipeline/Adapter factories
-    errors.py               # BankParserError hierarchy
-    models.py               # legacy facade re-exporting the domain model
-    readers.py              # legacy read_table() facade
-    writers.py              # legacy write_transactions() facade
+    __init__.py             # публичный API, версия, NullHandler
+    __main__.py             # python -m bank_parser
+    cli.py                  # argparse и composition root
+    application.py          # фасад Application (convert/read)
+    pipeline.py             # StatementPipeline (Template Method, CSV/PDF)
+    registry.py             # BankRegistry, фабрики Source/Pipeline/Adapter
+    errors.py               # иерархия BankParserError
+    models.py               # фасад доменной модели
+    readers.py              # фасад read_table()
+    writers.py              # фасад write_transactions()
     domain/
         models.py           # Transaction, Money, OperationType, SourceLocation
-        raw.py              # raw/normalised records, tables, layouts
-        parsing.py          # Russian date/amount parsers
-        currency.py         # source-currency helper
+        raw.py              # сырые/нормализованные записи, таблицы, layout
+        parsing.py          # парсеры российских дат и сумм
+        currency.py         # работа с кодом валюты источника
     ports/
         source.py           # StatementSource, TableReader, peeks
         extraction.py       # PdfExtractor
         mapping.py          # RowMapper, DateParser, AmountParser
-        adapter.py          # BankAdapter ABC + AdapterDependencies
+        adapter.py          # BankAdapter (ABC) + AdapterDependencies
         detection.py        # Detection, DetectionContext
         pipeline.py         # InputNormalizer, StatementValidator, CanonicalWriter
     adapters/
-        csv_source.py       # pandas/stdlib CSV readers + CsvStatementSource
-        pdf_source.py       # PDF metadata acquisition (pypdf)
+        csv_source.py       # pandas/stdlib CSV-ридеры + CsvStatementSource
+        pdf_source.py       # метаданные PDF через pypdf
         pdf_extractors.py   # pdfplumber text/table + pypdf extractors
         normalizers.py      # TableNormalizer, TextNormalizer
         validation.py       # DefaultStatementValidator
         writers.py          # CanonicalCsvWriter
-        peeks.py            # cheap CSV/PDF detection signals
+        peeks.py            # дешёвые сигналы для определения банка
     banks/
-        __init__.py         # BANK_ADAPTERS, build_registry(), legacy facades
+        __init__.py         # BANK_ADAPTERS, build_registry(), фасады
         tbank_csv.py        # TbankCsvMapper + TbankCsvAdapter
-        sber_csv.py         # SberCsvAdapter (reuses TbankCsvMapper)
+        sber_csv.py         # SberCsvAdapter (переиспользует TbankCsvMapper)
         alfa_csv.py         # AlfaCsvMapper + AlfaCsvAdapter
-        sber_pdf.py         # SberPdfMapper + SberPdfAdapter (line state machine)
-        ozon_pdf.py         # OzonPdfMapper + OzonPdfAdapter (table + purpose rules)
-        tbank.py            # legacy T-Bank facade (parse/parse_rows)
+        sber_pdf.py         # SberPdfMapper + SberPdfAdapter (state machine)
+        ozon_pdf.py         # OzonPdfMapper + OzonPdfAdapter (таблица + правила)
+        tbank.py            # фасад T-Bank (parse/parse_rows)
+tests/                      # unit-тесты pytest (inline-данные + tmp_path)
 scripts/
-    verify.py               # optional QA comparison harness (not a unit-test suite)
-docs/                       # local-only notes: spec.md, architecture.md, code_style.md
-.venv/                      # local virtual environment (gitignored)
+    verify.py               # сравнение с фикстурами
+docs/                       # локальные заметки: spec.md, architecture.md, code_style.md
+.venv/                      # локальное окружение (в .gitignore)
 ```
 
-`data/`, `docs/`, `.mnemon/`, `tmp/`, `.venv/` and Python caches are local-only
-and are excluded by `.gitignore`; they are never committed. The architecture and
-code-style notes for the multi-format (CSV + PDF) design live under `docs/` for
-local reference.
+`data/`, `docs/`, `.mnemon/`, `tmp/`, `.venv/` и кэши Python — локальные и не
+коммитятся. Архитектурные заметки лежат в `docs/`.
 
 ---
 
-## Adding a bank adapter
+## Архитектура
 
-The parser is built around a fixed pipeline
-(`acquire → extract → normalize → map → validate → write`). A new bank supplies
-a `BankAdapter` (metadata, detection, collaborators) and a `RowMapper`; it does
-not touch the pipeline, the writer or the CLI.
+Обработка идёт по фиксированному конвейеру (Template Method):
 
-1. Create `src/bank_parser/banks/<bank>.py`:
+```text
+acquire → extract → normalize → map → validate → write
+```
+
+Слои: `domain` (значения и правила), `ports` (протоколы/ABC), `adapters`
+(CSV/PDF-чтение, нормализация, валидация, writer), `banks` (адаптеры банков),
+`pipeline`/`registry`/`application`/`cli` (сборка и запуск). Банк-специфичен
+только адаптер; writer и CLI не меняются при добавлении банка.
+
+---
+
+## Добавление адаптера банка
+
+1. Создайте `src/bank_parser/banks/<bank>.py` с `RowMapper` и `BankAdapter`:
 
    ```python
    class MyBankMapper:
@@ -286,117 +290,122 @@ not touch the pipeline, the writer or the CLI.
            return MyBankMapper(self._deps.date_parser, self._deps.amount_parser)
    ```
 
-   Resolve columns by header name through `NormalizedTable.layout` (never by
-   position), use the injected date/amount parsers, build `Money` /
-   `Transaction.from_money`, and raise the location-aware `ParseError`
-   subclasses. Keep money in `Decimal`, never `float`.
+   Колонки ищите по имени через `NormalizedTable.layout`, деньги держите в
+   `Decimal`, ошибки оборачивайте в `ParseError` с локацией.
 
-2. Register the adapter class in `BANK_ADAPTERS` in
-   `src/bank_parser/banks/__init__.py`. Aliases and detection are derived from
-   the class metadata; no separate alias map is needed. If a bank shares the
-   exact header of an existing one (as Sber does with T-Bank), create a separate
-   adapter that reuses the existing mapper, and keep the shared-header probe at
-   the same confidence so a neutral filename ties and asks for `--bank` instead
-   of guessing.
+2. Зарегистрируйте класс в `BANK_ADAPTERS` в
+   `src/bank_parser/banks/__init__.py`.
 
-3. PDF adapters additionally provide a `PdfExtractor` from
-   `adapters/pdf_extractors.py` (`PdfPlumberTextExtractor`,
-   `PdfPlumberTableExtractor`, `PypdfTextExtractor`, or `FallbackExtractor`),
-   plus a normalizer and a mapper (line state machine or table rows). The PDF
-   source and detection peeks already exist; register the adapter the same way.
+3. Для PDF-адаптера добавьте `PdfExtractor` из `adapters/pdf_extractors.py`
+   (`PdfPlumberTextExtractor`, `PdfPlumberTableExtractor`, `PypdfTextExtractor`
+   или `FallbackExtractor`) и при необходимости свой normalizer/mapper.
 
-4. Try it explicitly first: `bank-parser ... --bank <bank>`. Add a QA
-   comparison under `scripts/` if you have a trustworthy reference file.
+4. Проверьте явно: `bank-parser ... --bank <bank>`. При наличии эталонного файла
+   добавьте сравнение в `scripts/`.
 
-The canonical model and writer stay unchanged; the adapter is the only
-bank-specific code. Design details are in `docs/architecture.md` §16–17
-(local-only).
+Каноническая модель и writer не меняются; банк-специфичен только адаптер.
 
 ---
 
-## Optional QA harness
+## Тестирование
 
-`scripts/verify.py` is a standalone comparison harness — deliberately *not* a
-unit-test suite. It runs the parser end-to-end, compares the generated CSV with
-a handwritten reference semantically (treating missing trailing empty fields as
-equal), checks canonical formatting on the generated file, and audits both
-files against an oracle derived independently from the input export.
+### Unit-тесты
 
 ```bash
-# Generate output for the default T-Bank fixture into tmp/ and compare it
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/pytest
+```
+
+Тесты лежат в [`tests/`](tests) и используют pytest с inline-данными и
+`tmp_path`; локальные файлы `data/` не требуются. Покрыты доменные значения и
+парсеры, CSV-ридеры/writer, нормализация/валидация, все пять мапперов банков,
+реестр/определение банка, конвейер/Application и CLI.
+
+### Проверка на фикстурах
+
+`scripts/verify.py` — отдельный сквозной harness (не unit-тесты). Он запускает
+парсер, сравнивает результат с рукописным эталоном семантически (недостающие
+пустые хвостовые поля считаются равными), проверяет канонический формат и
+сверяет оба файла с независимым оракулом из входной выписки.
+
+```bash
+# T-Bank: сгенерировать результат в tmp/ и сравнить
 .venv/bin/python scripts/verify.py
 
-# Compare any existing generated/reference pair (does not run the parser)
+# Сравнить готовую пару файлов
 .venv/bin/python scripts/verify.py --compare-only \
     --generated tmp/verify/Т-Банк.csv \
     --reference data/output/Т-Банк.csv
 ```
 
-Exit codes: `0` pass, `1` mismatch, `2` harness error. It is optional and is
-not required to use the parser.
+Ожидаемые количества строк и SHA-256 сгенерированных файлов для локальных
+фикстур:
+
+| Фикстура | Строк | SHA-256 |
+|---|---|---|
+| `data/input/T-Банк.csv` | 117 | `070b791241d0a6f468a6b212d98caaabc14c6ef1c82fa9057e8b671cce045c08` |
+| `data/input/Сбер_csv.csv` | 16 | `c71b1c1a68c1e7ae9fae49983d4ba656def5e33a319f66acbe8c6b71aeb594f0` |
+| `data/input/Альфа.CSV` | 96 | `d8709a291b76d1e455bdb5a4a325797a06fcf68a218e02826b4aa71608edee49` |
+| `data/input/Сбер.pdf` | 50 | `aa3e267d4de1787eb7ac8f39913031ea07e057e1a6560a6765a3aa92d24bcf08` |
+| `data/input/Ozon.pdf` | 47 | `790e0f1edca10dc4ed80a5485579e6e716c762b30cf435d80f31de319a7c6df1` |
+
+Коды возврата `verify.py`: `0` — успех, `1` — расхождение, `2` — ошибка harness.
 
 ---
 
-## Limitations and notes
+## Ограничения и примечания
 
-- **Supported adapters: T-Bank CSV, Sber CSV, Alfa-Bank CSV, Sber PDF and
-  Ozon PDF.** All five inputs in `data/input/` now convert; no registered-bank
-  gaps remain for this repository's fixtures.
-- **A neutral 17-column Russian CSV header is ambiguous.** The T-Bank and Sber
-  exports share the same header, so a file without a recognizable bank name in
-  its filename must be converted with an explicit `--bank tbank` or
-  `--bank sber-csv`.
-- **Handwritten reference files are hints, not byte-exact ground truth.** The
-  reference outputs under `data/output/` were typed by hand and may contain
-  manual errors (for example, a row that ends with 6 fields instead of 8
-  because the trailing empty `comment` and placeholder were omitted). The
-  generated output is clean and canonical; the QA harness tolerates and
-  explains such reference typos rather than treating them as parser bugs.
-- **The Sber PDF reference has six known manual discrepancies.** Compared with
-  the statement's own header lines, `data/output/Сбер.csv` has one wrong
-  category (row 8) and five wrong operation dates (rows 25, 28, 30, 31 and 41).
-  The generated Sber PDF output follows the operation date printed on the PDF
-  header, never the processing date; QA treats exactly these six differences as
-  explained reference typos.
-- **The Ozon PDF reference is handwritten and noisy.** `data/output/Ozon.csv`
-  leaves `currency` blank on rows 2–47, deletes embedded newlines from merchant
-  text (and sometimes keeps a `Получатель:` prefix), has four category
-  inconsistencies, a type inconsistency on row 12 (reference `Пополнение` where
-  the PDF amount is negative) and an amount typo on row 47 (`499.00` vs the
-  PDF's `499.97`). The generated output is clean and canonical, so it
-  intentionally differs from that reference at those points; QA explains every
-  difference from the PDF's own table rows instead of matching the handwritten
-  file byte-for-byte.
-- The `Статус` / `Учёт в аналитике` columns are read but not used for filtering
-  in this milestone: every input transaction is included.
-- The local fixtures exercise only a subset of the tolerance rules above.
-  Dot decimals, Unicode minus, thousands separators, alternative date formats,
-  `cp1251`/tab/comma inputs, embedded delimiters/newlines, zero amounts and the
-  currency/category fallbacks are implemented and were checked with synthetic
-  inputs, but are not all present in the T-Bank fixture. The Alfa fixture does
-  cover the explicit `type` column and the `transactionDate` fallback path.
-- **Sber PDF extraction is text-based.** `data/input/Сбер.pdf` is 3 pages and
-  pdfplumber finds no tables in it: the mapper is a line-oriented state machine
-  over page text. Text extraction requires `pdfplumber`; `pypdf` is only a
-  fallback and is not used for the supported Sber statement.
-- **Ozon PDF extraction is table-based.** `data/input/Ozon.pdf` is 6 pages and
-  pdfplumber returns one table per page (49 rows: 2 header rows plus 47 data
-  rows); a record predicate keeps only rows that start with an operation
-  timestamp. The purpose rules are ordered, and an unrecognized purpose raises
-  a location-aware `ParseError` instead of being silently skipped.
-- Output directories are not created automatically; the destination directory
-  must exist.
+- **Поддержаны адаптеры T-Bank CSV, Сбер CSV, Альфа-Банк CSV, Сбер PDF и
+  Ozon PDF.** Все пять файлов из `data/input/` преобразуются.
+- **Нейтральный 17-колоночный русский CSV неоднозначен.** У T-Bank и Сбера
+  одинаковый заголовок, поэтому файл без названия банка в имени нужно
+  обрабатывать с явным `--bank tbank` или `--bank sber-csv`.
+- **Рукописные эталоны — подсказка, а не побайтовая истина.** Файлы в
+  `data/output/` набраны вручную и могут содержать ошибки. Генератор выдаёт
+  чистый канонический результат; QA объясняет расхождения как опечатки
+  эталона.
+- **В эталоне Сбер PDF шесть известных опечаток.** По сравнению с заголовками
+  самой выписки в `data/output/Сбер.csv` неверна категория в строке 8 и даты в
+  строках 25, 28, 30, 31 и 41. Генератор использует дату операции из PDF, а не
+  дату обработки; эти шесть расхождений объяснены.
+- **Эталон Ozon PDF шумный.** В `data/output/Ozon.csv` валюта пуста в строках
+  2–47, из merchant-строк удалены переводы строк (иногда сохранён префикс
+  `Получатель:`), есть четыре несогласованности категорий, ошибка типа в
+  строке 12 и суммы в строке 47 (`499.00` вместо `499.97`). Генератор выдаёт
+  чистый результат и намеренно отличается в этих местах; QA объясняет каждое
+  расхождение по таблице PDF.
+- Колонки `Статус` / `Учёт в аналитике` читаются, но не фильтруют строки:
+  включаются все операции.
+- Локальные фикстуры покрывают не все правила терпимости. Десятичная точка,
+  юникодный минус, разделители тысяч, альтернативные форматы дат, `cp1251`,
+  табуляция, встроенные разделители/переводы строк, нулевые суммы и fallback
+  валюты/категории реализованы и проверены синтетическими тестами, но не все
+  присутствуют в T-Bank-фикстуре. Альфа-фикстура покрывает явный `type` и
+  fallback `transactionDate`.
+- **Сбер PDF извлекается из текста.** В `data/input/Сбер.pdf` 3 страницы,
+  pdfplumber не находит таблиц: маппер — построчный state machine. Нужен
+  `pdfplumber`; `pypdf` — только резерв и для поддерживаемой выписки не
+  используется.
+- **Ozon PDF извлекается из таблиц.** В `data/input/Ozon.pdf` 6 страниц, по
+  одной таблице на страницу (49 строк: 2 заголовка + 47 данных); предикат
+  оставляет только строки с отметкой времени. Правила назначения
+  упорядочены, неизвестное назначение даёт `ParseError` с локацией, а не
+  молча пропускается.
+- Выходной каталог не создаётся автоматически.
 
 ---
 
-## License
+## Лицензия
 
-MIT — see [LICENSE](LICENSE).
+MIT — см. [LICENSE](LICENSE).
 
-## Not committed
+## Что не коммитится
 
-Real bank data, handwritten reference files, local planning notes and scratch
-output are deliberately kept local and are **not** part of this repository:
-`data/`, `docs/`, `.mnemon/` and `tmp/` are ignored by `.gitignore`. The
-repository contains only the parser code, `scripts/verify.py`, packaging
-metadata, this README, `.gitignore` and the license.
+Реальные банковские данные, рукописные эталоны, локальные заметки и временный
+вывод не входят в репозиторий: `data/`, `docs/`, `.mnemon/` и `tmp/` исключены
+через `.gitignore`. В репозитории — код парсера, unit-тесты в `tests/`,
+`scripts/verify.py`, упаковка, оба README, `.gitignore` и лицензия.
+
+---
+
+**Русская версия** · [English version](README.en.md)
