@@ -155,15 +155,39 @@ README.md                   # this file
 .gitignore
 LICENSE
 src/bank_parser/
-    __init__.py             # public API re-exports + version
+    __init__.py             # public API re-exports + version + NullHandler
     __main__.py             # python -m bank_parser entry point
-    models.py               # Transaction dataclass (the canonical model)
-    readers.py              # encoding/delimiter/quoting-tolerant table reader
-    writers.py              # canonical CSV writer (BOM, LF, 8 fields)
-    cli.py                  # argument parsing, auto-detection, error handling
+    cli.py                  # argparse + composition root
+    application.py          # Application use-case facade (convert/read)
+    pipeline.py             # StatementPipeline Template Method (CSV/PDF)
+    registry.py             # BankRegistry, Source/Pipeline/Adapter factories
+    errors.py               # BankParserError hierarchy
+    models.py               # legacy facade re-exporting the domain model
+    readers.py              # legacy read_table() facade
+    writers.py              # legacy write_transactions() facade
+    domain/
+        models.py           # Transaction, Money, OperationType, SourceLocation
+        raw.py              # raw/normalised records, tables, layouts
+        parsing.py          # Russian date/amount parsers
+        currency.py         # source-currency helper
+    ports/
+        source.py           # StatementSource, TableReader, peeks
+        extraction.py       # PdfExtractor
+        mapping.py          # RowMapper, DateParser, AmountParser
+        adapter.py          # BankAdapter ABC + AdapterDependencies
+        detection.py        # Detection, DetectionContext
+        pipeline.py         # InputNormalizer, StatementValidator, CanonicalWriter
+    adapters/
+        csv_source.py       # pandas/stdlib CSV readers + CsvStatementSource
+        normalizers.py      # TableNormalizer, TextNormalizer
+        validation.py       # DefaultStatementValidator
+        writers.py          # CanonicalCsvWriter
+        peeks.py            # cheap CSV/PDF detection signals
+        pdf_source.py       # PDF metadata acquisition (no PDF adapters yet)
     banks/
-        __init__.py         # bank registry, aliases, get_parser(), detect_bank()
-        tbank.py            # T-Bank adapter (header mapping, date/amount parsing)
+        __init__.py         # BANK_ADAPTERS, build_registry(), legacy facades
+        tbank_csv.py        # TbankCsvMapper + TbankCsvAdapter
+        tbank.py            # legacy T-Bank facade (parse/parse_rows)
 scripts/
     verify.py               # optional QA comparison harness (not a unit-test suite)
 docs/                       # local-only notes: spec.md, architecture.md, code_style.md
@@ -179,34 +203,50 @@ local reference.
 
 ## Adding a bank adapter
 
-1. Create `src/bank_parser/banks/<bank>.py` and implement the adapter contract:
+The parser is built around a fixed pipeline
+(`acquire → extract → normalize → map → validate → write`). A new bank supplies
+a `BankAdapter` (metadata, detection, collaborators) and a `RowMapper`; it does
+not touch the pipeline, the writer or the CLI.
+
+1. Create `src/bank_parser/banks/<bank>.py`:
 
    ```python
-   BANK_NAME = "<bank>"
-   ALIASES = ("<bank>", "...")
+   class MyBankMapper:
+       def __init__(self, date_parser, amount_parser): ...
+       def map(self, document: NormalizedDocument) -> list[Transaction]: ...
 
-   def parse_rows(rows: list[list[str]], *, source: str = "") -> list[Transaction]: ...
-   def parse(path: str | Path) -> list[Transaction]: ...
+   class MyBankAdapter(BankAdapter):
+       name = "<bank>"
+       aliases = ("<bank>", "...")
+       formats = frozenset({InputFormat.CSV})
+       required_headers = (...)
+
+       @classmethod
+       def probe(cls, ctx: DetectionContext) -> Detection | None: ...
+
+       def create_mapper(self) -> RowMapper:
+           return MyBankMapper(self._deps.date_parser, self._deps.amount_parser)
    ```
 
-   Reuse `bank_parser.readers.read_table()` (encoding, delimiter, quoting) and
-   emit `bank_parser.models.Transaction` objects. Resolve columns by header
-   name, not position. Keep money in `Decimal`, never `float`. Raise
-   `ValueError` messages that include the 1-based data-row number when a cell
-   cannot be parsed.
+   Resolve columns by header name through `NormalizedTable.layout` (never by
+   position), use the injected date/amount parsers, build `Money` /
+   `Transaction.from_money`, and raise the location-aware `ParseError`
+   subclasses. Keep money in `Decimal`, never `float`.
 
-2. Register the adapter in `src/bank_parser/banks/__init__.py`:
-   - add `"<bank>": "<bank>"` to `_REGISTRY`;
-   - add the user-facing aliases to `_ALIASES`.
+2. Register the adapter class in `BANK_ADAPTERS` in
+   `src/bank_parser/banks/__init__.py`. Aliases and detection are derived from
+   the class metadata; no separate alias map is needed.
 
-3. Optionally teach `detect_bank()` new filename/header markers so
-   `--bank` can be omitted.
+3. PDF adapters additionally provide a `PdfExtractor` (pdfplumber / pypdf) and,
+   when needed, a custom normalizer or record predicate. The PDF source and
+   detection peeks already exist; register the adapter the same way.
 
 4. Try it explicitly first: `bank-parser ... --bank <bank>`. Add a QA
    comparison under `scripts/` if you have a trustworthy reference file.
 
 The canonical model and writer stay unchanged; the adapter is the only
-bank-specific code.
+bank-specific code. Design details are in `docs/architecture.md` §16–17
+(local-only).
 
 ---
 
@@ -220,10 +260,10 @@ files against an oracle derived independently from the input export.
 
 ```bash
 # Generate output for the default T-Bank fixture into tmp/ and compare it
-python3 scripts/verify.py
+.venv/bin/python scripts/verify.py
 
 # Compare any existing generated/reference pair (does not run the parser)
-python3 scripts/verify.py --compare-only \
+.venv/bin/python scripts/verify.py --compare-only \
     --generated tmp/verify/Т-Банк.csv \
     --reference data/output/Т-Банк.csv
 ```
@@ -235,8 +275,10 @@ not required to use the parser.
 
 ## Limitations and notes
 
-- **Only T-Bank is supported.** Other banks (and non-CSV inputs such as PDF)
-  are out of scope for this milestone.
+- **Only the T-Bank CSV adapter is registered.** The class-based infrastructure
+  for other CSV banks and PDF statements (sources, ports, pipeline, detection)
+  is in place, but the remaining adapters are a separate milestone. PDF input
+  without a registered PDF adapter is rejected with a clear error.
 - **Handwritten reference files are hints, not byte-exact ground truth.** The
   reference outputs under `data/output/` were typed by hand and may contain
   manual errors (for example, a row that ends with 6 fields instead of 8

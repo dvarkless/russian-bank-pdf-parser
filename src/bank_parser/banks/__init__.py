@@ -1,35 +1,36 @@
-"""Registry of supported banks plus bank auto-detection helpers."""
+"""Supported-bank registry plus v1 compatibility facades.
+
+New code should build an :class:`~bank_parser.application.Application` through
+``bank_parser.cli.build_application``.  The legacy functions here keep the v1
+surface (``get_parser``, ``detect_bank``, ``supported_banks``) while delegating
+to the OOP registry and application.
+"""
 
 from __future__ import annotations
 
-import importlib
-import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-from ..models import Transaction
-from ..readers import read_table
+from ..domain.models import Transaction
+from ..ports.adapter import BankAdapter
+from .tbank_csv import TbankCsvAdapter
 
-#: Canonical bank name -> parser module inside :mod:`bank_parser.banks`.
-_REGISTRY: dict[str, str] = {
-    "tbank": "tbank",
-}
+__all__ = [
+    "BANK_ADAPTERS",
+    "SUPPORTED_BANKS",
+    "build_registry",
+    "detect_bank",
+    "get_parser",
+    "supported_banks",
+]
 
-#: Accepted user-facing aliases (case-insensitive) for each supported bank.
-_ALIASES: dict[str, str] = {
-    "tbank": "tbank",
-    "t-bank": "tbank",
-    "т-банк": "tbank",
-    "т банк": "tbank",
-}
+#: Canonical adapter classes, in deterministic registration/detection order.
+BANK_ADAPTERS: tuple[type[BankAdapter], ...] = (TbankCsvAdapter,)
 
-#: Filename fragments (lowercase, separators removed) that identify T-Bank.
-_TBANK_FILENAME_MARKERS: tuple[str, ...] = ("tbank", "тбанк", "tбанк")
-
-_TBANK_HEADER_MARKERS: tuple[str, ...] = ("Номер карты", "Дата операции")
-
-SUPPORTED_BANKS: tuple[str, ...] = tuple(sorted(_REGISTRY))
-"""Canonical names of the banks this build can parse."""
+#: Canonical names of the banks this build can parse.
+SUPPORTED_BANKS: tuple[str, ...] = tuple(
+    sorted(adapter.name for adapter in BANK_ADAPTERS)
+)
 
 
 def supported_banks() -> list[str]:
@@ -37,78 +38,66 @@ def supported_banks() -> list[str]:
     return list(SUPPORTED_BANKS)
 
 
-def _normalize_name(name: str) -> str:
-    """Normalize a user-supplied bank name for alias lookup."""
-    return " ".join(name.strip().lower().split())
-
-
-def _load_parser_module(module_name: str):
-    """Import a bank parser module lazily, with a clear error if unavailable."""
-    try:
-        return importlib.import_module(f".{module_name}", __name__)
-    except ImportError as exc:  # pragma: no cover - only before the module lands
-        raise ImportError(
-            f"Parser module for bank {module_name!r} is not available: {exc}"
-        ) from exc
-
-
-def get_parser(name: str) -> Callable[[str | Path], list[Transaction]]:
-    """Return the ``parse`` callable for the named bank.
-
-    Args:
-        name: Canonical bank name or one of its aliases (case-insensitive).
+def build_registry():
+    """Build the bank registry from :data:`BANK_ADAPTERS`.
 
     Returns:
-        A callable that takes a file path and returns a list of
-        :class:`~bank_parser.models.Transaction`.
+        A new :class:`~bank_parser.registry.BankRegistry` instance.
+    """
+    from ..registry import BankRegistry
+
+    return BankRegistry(BANK_ADAPTERS)
+
+
+def get_parser(
+    name: str,
+) -> Callable[[str | Path], list[Transaction]]:
+    """Return a legacy path-to-transactions callable for a bank.
+
+    Args:
+        name: Canonical bank name or alias (case-insensitive).
+
+    Returns:
+        A callable that reads a statement and returns its transactions.
 
     Raises:
-        ValueError: If *name* is empty or does not name a supported bank.
+        UnsupportedBankError: If *name* is empty or not a supported bank.
+        OSError: From the returned callable when the input cannot be read.
     """
-    if not isinstance(name, str) or not _normalize_name(name):
-        raise ValueError("Bank name must be a non-empty string.")
+    registry = build_registry()
+    registry.resolve_alias(name)
 
-    key = _normalize_name(name)
-    module_name = _ALIASES.get(key)
-    if module_name is None:
-        raise ValueError(
-            f"Unsupported bank {name!r}. Supported banks: {', '.join(SUPPORTED_BANKS)} "
-            "(aliases: t-bank, т-банк, т банк)."
-        )
-    module = _load_parser_module(module_name)
-    return module.parse
+    def parse(path: str | Path) -> list[Transaction]:
+        from ..cli import build_application
+
+        application = build_application()
+        return application.read_transactions(Path(path), bank=name)
+
+    return parse
 
 
 def detect_bank(path: str | Path) -> str:
-    """Detect the bank that produced *path*.
-
-    T-Bank is detected when the file name contains ``t-bank``/``tbank``/
-    ``т-банк``/``т банк`` (in any mixing of Latin and Cyrillic), or when the
-    first row (the header) contains both ``Номер карты`` and ``Дата операции``.
+    """Detect the canonical bank name that produced *path*.
 
     Args:
-        path: Path to the export file.
+        path: Input statement path.
 
     Returns:
         The canonical bank name, e.g. ``"tbank"``.
 
     Raises:
         FileNotFoundError: If *path* does not exist.
-        ValueError: If the bank cannot be detected.
+        UnsupportedFormatError: If the suffix is not ``.csv`` or ``.pdf``.
+        DetectionError: If the bank cannot be detected or detection ties.
     """
+    from ..adapters.csv_source import PandasTableReader
+    from ..adapters.peeks import PandasCsvPeek, PdfPlumberPdfPeek
+    from ..ports.detection import DetectionContext
+
     source = Path(path)
-
-    compact_name = re.sub(r"[\s\-_.]+", "", source.stem.lower())
-    if any(marker in compact_name for marker in _TBANK_FILENAME_MARKERS):
-        return "tbank"
-
-    rows = read_table(source)
-    header = {cell.strip() for cell in rows[0]} if rows else set()
-    if all(marker in header for marker in _TBANK_HEADER_MARKERS):
-        return "tbank"
-
-    raise ValueError(
-        f"Could not detect the bank for {source}. "
-        "Use --bank to select a supported bank explicitly "
-        f"({', '.join(SUPPORTED_BANKS)})."
+    context = DetectionContext(
+        source,
+        csv_peek=PandasCsvPeek(PandasTableReader()),
+        pdf_peek=PdfPlumberPdfPeek(),
     )
+    return build_registry().detect(context).name
