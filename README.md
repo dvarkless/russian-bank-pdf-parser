@@ -9,13 +9,14 @@ spreadsheet, database, or accounting tool.
 
 The tool is deliberately boring: no network access, no binary floats for money
 (`decimal.Decimal` only), and no hidden state. `pandas` is confined to tabular
-transport, while PDF statements are read with `pdfplumber` (and `pypdf` as a
-fallback). The output is byte-for-byte deterministic for a given input.
+CSV/table transport, and the PDF extraction path is built on `pdfplumber` (with
+`pypdf` as a fallback) even though no PDF adapter is registered yet. The output
+is byte-for-byte deterministic for a given input.
 
-> Status: the **T-Bank** CSV adapter is the only bank implemented so far. The
-> adapter registry is designed to be extended (other CSV banks and PDF
-> statements); any other bank is unsupported today and will be rejected with a
-> clear error.
+> Status: three CSV adapters are implemented — **T-Bank CSV**, **Sber CSV** and
+> **Alfa-Bank CSV**. PDF statements are the next milestone: the extraction
+> infrastructure is in place, but no PDF bank adapter is registered yet, so PDF
+> input is rejected with a clear error.
 
 ---
 
@@ -37,12 +38,35 @@ fallback). The output is byte-for-byte deterministic for a given input.
 
 ## Supported banks
 
-| Bank   | Input                     | Status                    |
-|--------|---------------------------|---------------------------|
-| T-Bank | T-Bank CSV export         | Supported (only bank)     |
+| Bank       | Input                        | Adapter name | Fixture rows | Status    |
+|------------|------------------------------|--------------|--------------|-----------|
+| T-Bank     | T-Bank 17-column CSV export  | `tbank`      | 117          | Supported |
+| Sber       | Sber 17-column CSV export    | `sber-csv`   | 16           | Supported |
+| Alfa-Bank  | Alfa 16-column English CSV   | `alfa`       | 96           | Supported |
 
-Supported aliases for the `--bank` option: `tbank`, `t-bank`, `т-банк`,
-`т банк` (case-insensitive).
+PDF statements are **not** supported yet: the extraction infrastructure exists,
+but no PDF bank adapter is registered.
+
+Supported aliases for the `--bank` option (case-insensitive):
+
+| Bank       | Aliases |
+|------------|---------|
+| T-Bank     | `tbank`, `t-bank`, `т-банк`, `т банк` |
+| Sber       | `sber-csv`, `sber`, `сбер`, `сбербанк` |
+| Alfa-Bank  | `alfa`, `alpha`, `альфа`, `альфа-банк` |
+
+### Bank detection
+
+Detection is **filename-first**, then header-signature based:
+
+- `tbank` / `t-bank` / `т-банк`, `sber` / `сбер` / `сбербанк`, and
+  `alfa` / `alpha` / `альфа` in the filename select the adapter at high
+  confidence (90).
+- With a neutral filename, a distinctive **English Alfa header**
+  (`operationDate`, `merchant`, `amount`, `type`) resolves to `alfa`.
+- A neutral **17-column Russian header** is shared by the T-Bank and Sber CSV
+  exports, so it is deliberately ambiguous: the registry raises a detection
+  error and asks for `--bank` instead of guessing.
 
 Bank support lives behind a registry, so adding a new bank does not change the
 CLI or the canonical writer. See
@@ -70,18 +94,18 @@ date,merchant,amount,currency,category,type,comment,
 
 | Column     | Source / rule |
 |------------|---------------|
-| `date`     | Operation date, `DD/MM/YYYY` |
-| `merchant` | Input `Описание` (T-Bank) |
-| `amount`   | **Absolute** value, exactly 2 decimal digits, `.` separator (`-900,00` → `900.00`) |
-| `currency` | Input `Валюта операции`; falls back to `Валюта счёта` when blank |
-| `category` | Input `Категория по-умолчанию`; falls back to `Ваша категория` when blank |
-| `type`     | `Списание` for a negative or zero signed amount, `Пополнение` for a positive one |
-| `comment`  | Input `Сообщение` (may be empty) |
+| `date`     | Operation date, `DD/MM/YYYY` (T-Bank/Sber `Дата операции`; Alfa `operationDate`, falling back to `transactionDate` only when it is blank) |
+| `merchant` | Description text (T-Bank/Sber `Описание`; Alfa `merchant`) |
+| `amount`   | **Absolute** value, exactly 2 decimal digits, `.` separator (T-Bank/Sber signed `Сумма операции`; Alfa positive `amount` with the sign taken from `type`) |
+| `currency` | T-Bank/Sber `Валюта операции`, falling back to `Валюта счёта`; Alfa `currency` (e.g. `RUR`), preserved and never converted |
+| `category` | T-Bank/Sber `Категория по-умолчанию`, falling back to `Ваша категория`; Alfa `category` |
+| `type`     | `Списание` / `Пополнение` — derived from the signed amount for T-Bank/Sber and from the explicit `type` column for Alfa; zero amounts are `Списание` |
+| `comment`  | T-Bank/Sber `Сообщение`; Alfa `comment` (may be empty) |
 | (8th)      | Always empty (trailing comma) |
 
 One data row is written per input transaction, in input order. Rows are not
-sorted, filtered, deduplicated, or dropped — not even by `Статус` or
-`Учёт в аналитике`.
+sorted, filtered, deduplicated, or dropped — not even by `Статус` /
+`Учёт в аналитике` (T-Bank/Sber) or `status` (Alfa).
 
 ---
 
@@ -127,14 +151,15 @@ PYTHONPATH=src .venv/bin/python -m bank_parser \
     -o out.csv
 ```
 
-`--bank` may be omitted when the file can be auto-detected (T-Bank is detected
-from the filename or from its header columns); pass it explicitly to be safe:
+`--bank` may be omitted when the file's bank can be auto-detected from its
+filename (or, for Alfa, from its distinctive header). Pass it explicitly when
+the filename is neutral, because the shared 17-column Russian header is
+ambiguous between T-Bank and Sber:
 
 ```bash
-.venv/bin/bank-parser \
-    -i data/input/T-Банк.csv \
-    -o out.csv \
-    --bank tbank
+.venv/bin/bank-parser -i data/input/T-Банк.csv   -o out.csv --bank tbank
+.venv/bin/bank-parser -i data/input/Сбер_csv.csv -o out.csv --bank sber-csv
+.venv/bin/bank-parser -i data/input/Альфа.CSV    -o out.csv --bank alfa
 ```
 
 ### Behaviour
@@ -187,6 +212,8 @@ src/bank_parser/
     banks/
         __init__.py         # BANK_ADAPTERS, build_registry(), legacy facades
         tbank_csv.py        # TbankCsvMapper + TbankCsvAdapter
+        sber_csv.py         # SberCsvAdapter (reuses TbankCsvMapper)
+        alfa_csv.py         # AlfaCsvMapper + AlfaCsvAdapter
         tbank.py            # legacy T-Bank facade (parse/parse_rows)
 scripts/
     verify.py               # optional QA comparison harness (not a unit-test suite)
@@ -235,7 +262,11 @@ not touch the pipeline, the writer or the CLI.
 
 2. Register the adapter class in `BANK_ADAPTERS` in
    `src/bank_parser/banks/__init__.py`. Aliases and detection are derived from
-   the class metadata; no separate alias map is needed.
+   the class metadata; no separate alias map is needed. If a bank shares the
+   exact header of an existing one (as Sber does with T-Bank), create a separate
+   adapter that reuses the existing mapper, and keep the shared-header probe at
+   the same confidence so a neutral filename ties and asks for `--bank` instead
+   of guessing.
 
 3. PDF adapters additionally provide a `PdfExtractor` (pdfplumber / pypdf) and,
    when needed, a custom normalizer or record predicate. The PDF source and
@@ -275,10 +306,14 @@ not required to use the parser.
 
 ## Limitations and notes
 
-- **Only the T-Bank CSV adapter is registered.** The class-based infrastructure
-  for other CSV banks and PDF statements (sources, ports, pipeline, detection)
-  is in place, but the remaining adapters are a separate milestone. PDF input
-  without a registered PDF adapter is rejected with a clear error.
+- **CSV adapters only: T-Bank, Sber and Alfa-Bank.** PDF statements are the
+  next milestone; the extraction infrastructure (sources, ports, pipeline,
+  detection) is in place, but no PDF adapter is registered, so PDF input is
+  rejected with a clear error.
+- **A neutral 17-column Russian CSV header is ambiguous.** The T-Bank and Sber
+  exports share the same header, so a file without a recognizable bank name in
+  its filename must be converted with an explicit `--bank tbank` or
+  `--bank sber-csv`.
 - **Handwritten reference files are hints, not byte-exact ground truth.** The
   reference outputs under `data/output/` were typed by hand and may contain
   manual errors (for example, a row that ends with 6 fields instead of 8
@@ -287,11 +322,12 @@ not required to use the parser.
   explains such reference typos rather than treating them as parser bugs.
 - The `Статус` / `Учёт в аналитике` columns are read but not used for filtering
   in this milestone: every input transaction is included.
-- The T-Bank fixture exercises only a subset of the tolerance rules above.
+- The local CSV fixtures exercise only a subset of the tolerance rules above.
   Dot decimals, Unicode minus, thousands separators, alternative date formats,
   `cp1251`/tab/comma inputs, embedded delimiters/newlines, zero amounts and the
   currency/category fallbacks are implemented and were checked with synthetic
-  inputs, but are not all present in the fixture.
+  inputs, but are not all present in the T-Bank fixture. The Alfa fixture does
+  cover the explicit `type` column and the `transactionDate` fallback path.
 - Output directories are not created automatically; the destination directory
   must exist.
 

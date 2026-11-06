@@ -13,6 +13,8 @@ from pathlib import Path
 
 from ..domain.models import Transaction
 from ..ports.adapter import BankAdapter
+from .alfa_csv import AlfaCsvAdapter
+from .sber_csv import SberCsvAdapter
 from .tbank_csv import TbankCsvAdapter
 
 __all__ = [
@@ -25,7 +27,11 @@ __all__ = [
 ]
 
 #: Canonical adapter classes, in deterministic registration/detection order.
-BANK_ADAPTERS: tuple[type[BankAdapter], ...] = (TbankCsvAdapter,)
+BANK_ADAPTERS: tuple[type[BankAdapter], ...] = (
+    TbankCsvAdapter,
+    SberCsvAdapter,
+    AlfaCsvAdapter,
+)
 
 #: Canonical names of the banks this build can parse.
 SUPPORTED_BANKS: tuple[str, ...] = tuple(
