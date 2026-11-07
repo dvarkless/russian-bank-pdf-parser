@@ -19,14 +19,12 @@ from ..domain.models import InputFormat, Money, Transaction
 from ..domain.raw import (
     NormalizedDocument,
     NormalizedTable,
-    RawRecord,
     RawRow,
 )
 from ..errors import (
     AmountParseError,
     DateParseError,
     NormalizationError,
-    ParseError,
     ValidationError,
 )
 from ..ports.adapter import BankAdapter
@@ -48,16 +46,43 @@ _RECORD_DATE_PATTERN = re.compile(
 
 _PURPOSE_SBP = "через СБП"
 _PURPOSE_RECIPIENT = "Получатель:"
+_PURPOSE_SENDER = "Отправитель:"
 _PURPOSE_OWN_FUNDS = "Перевод собственных средств"
 _PURPOSE_OZON_PLATFORM = "Платформе Ozon"
 _PURPOSE_GOODS = "Оплата товаров"
 _PURPOSE_TIPS = "Чаевые по заказу"
+_PURPOSE_CASHBACK = "Выплата кешбека"
+_PURPOSE_DEPOSIT_PLACEMENT = "Размещение вклада"
+_PURPOSE_DEPOSIT_RETURN = "Возврат вклада"
+_PURPOSE_REFUND = "Возврат оплаты"
+_PURPOSE_BANK_CLIENT = "Перевод клиенту Банка"
+_PURPOSE_BILL_PAYMENT = "Платеж в пользу"
+_PURPOSE_CASH_WITHDRAWAL = "Снятие наличных"
+_PURPOSE_INCOMING_TRANSFER = "Зачисление по переводу"
+_PURPOSE_ERRONEOUS_RETURN = "Возв.ошиб"
+_PURPOSE_IP_DEBT = "оплата задолженности по ИП"
 
 _CATEGORY_SBP = "Перевод через СБП"
 _CATEGORY_OWN_FUNDS = "Перевод собственных средств"
 _CATEGORY_OZON_PLATFORM = "Оплата товаров/услуг на Платформе Ozon"
 _CATEGORY_GOODS = "Оплата товаров"
 _CATEGORY_TIPS = "Чаевые по заказу"
+_CATEGORY_CASHBACK = "Кешбэк"
+_CATEGORY_DEPOSIT_PLACEMENT = "Размещение вклада"
+_CATEGORY_DEPOSIT_RETURN = "Возврат вклада"
+_CATEGORY_CARD_REFUND = "Возврат оплаты товаров"
+_CATEGORY_PLATFORM_REFUND = (
+    "Возврат оплаты товаров/услуг на Платформе Ozon"
+)
+_CATEGORY_BANK_CLIENT = "Перевод клиенту Банка"
+_CATEGORY_MTS = "Платеж в пользу МТС"
+_CATEGORY_TSZH = "Платеж в пользу ТСЖ"
+_CATEGORY_BILL_PAYMENT = "Платежи"
+_CATEGORY_CASH_WITHDRAWAL = "Снятие наличных"
+_CATEGORY_INCOMING_TRANSFER = "Зачисление по переводу"
+_CATEGORY_ERRONEOUS_RETURN = "Возврат ошибочного перевода"
+_CATEGORY_IP_DEBT = "Оплата задолженности по ИП"
+_CATEGORY_OTHER = "Прочие операции"
 
 _OZON_PREMIUM = "(Ozon Premium)"
 _WITHOUT_VAT_SUFFIX = ". Без НДС"
@@ -134,7 +159,6 @@ class OzonPdfMapper:
             DateParseError: If a record's operation timestamp cannot be parsed.
             AmountParseError: If a record's amount cannot be parsed.
             ValidationError: If the two amount columns disagree.
-            ParseError: If a purpose matches none of the supported rules.
         """
         if not isinstance(document, NormalizedTable):
             raise NormalizationError(
@@ -183,9 +207,7 @@ class OzonPdfMapper:
             purpose = _normalize_purpose(
                 record.cell(self.PURPOSE_COLUMN)
             )
-            category, merchant = self._classify_purpose(
-                purpose, record=record
-            )
+            category, merchant = self._classify_purpose(purpose)
 
             try:
                 money = Money(
@@ -212,26 +234,77 @@ class OzonPdfMapper:
             )
         return transactions
 
-    def _classify_purpose(
-        self, purpose: str, *, record: RawRecord
-    ) -> tuple[str, str]:
+    def _classify_purpose(self, purpose: str) -> tuple[str, str]:
         """Return ``(category, merchant)`` for a normalised purpose.
+
+        The rules are ordered: refunds are recognised before the matching
+        payment rules, incoming SBP transfers use ``Отправитель:`` while
+        outgoing ones use ``Получатель:``, and the odd 2026 statement purposes
+        (cashback, deposits, bill payments, cash withdrawal, Card2Card,
+        erroneous/debt transfers) each get a descriptive category.  A purpose
+        that still matches nothing falls back to ``Прочие операции`` so that a
+        new statement does not block the whole conversion.
 
         Args:
             purpose: Purpose text with whitespace runs collapsed.
-            record: Source record, used for the error location.
 
         Returns:
             The category and merchant for the first matching rule.
-
-        Raises:
-            ParseError: If no rule matches.
         """
-        if _PURPOSE_SBP in purpose and _PURPOSE_RECIPIENT in purpose:
-            return _CATEGORY_SBP, self._sbp_recipient(purpose)
+        if _PURPOSE_SBP in purpose:
+            if _PURPOSE_RECIPIENT in purpose:
+                return _CATEGORY_SBP, self._sbp_party(
+                    purpose, _PURPOSE_RECIPIENT
+                )
+            if _PURPOSE_SENDER in purpose:
+                return _CATEGORY_SBP, self._sbp_party(
+                    purpose, _PURPOSE_SENDER
+                )
+
+        if _PURPOSE_CASHBACK in purpose:
+            return _CATEGORY_CASHBACK, ""
 
         if _PURPOSE_OWN_FUNDS in purpose:
             return _CATEGORY_OWN_FUNDS, ""
+
+        if _PURPOSE_DEPOSIT_PLACEMENT in purpose:
+            return _CATEGORY_DEPOSIT_PLACEMENT, ""
+
+        if _PURPOSE_DEPOSIT_RETURN in purpose:
+            return _CATEGORY_DEPOSIT_RETURN, ""
+
+        if _PURPOSE_REFUND in purpose and _PURPOSE_OZON_PLATFORM in purpose:
+            return _CATEGORY_PLATFORM_REFUND, ""
+
+        if _PURPOSE_REFUND in purpose and " по карте " in purpose:
+            return _CATEGORY_CARD_REFUND, self._card_merchant(purpose)
+
+        if _PURPOSE_BANK_CLIENT in purpose:
+            return _CATEGORY_BANK_CLIENT, ""
+
+        if _PURPOSE_BILL_PAYMENT in purpose:
+            payee = self._bill_payee(purpose)
+            if "МТС" in payee:
+                return _CATEGORY_MTS, payee
+            if "ТСЖ" in payee:
+                return _CATEGORY_TSZH, payee
+            return _CATEGORY_BILL_PAYMENT, payee
+
+        if _PURPOSE_CASH_WITHDRAWAL in purpose:
+            return _CATEGORY_CASH_WITHDRAWAL, self._cash_withdrawal_merchant(
+                purpose
+            )
+
+        if _PURPOSE_INCOMING_TRANSFER in purpose:
+            return _CATEGORY_INCOMING_TRANSFER, self._incoming_transfer_source(
+                purpose
+            )
+
+        if _PURPOSE_ERRONEOUS_RETURN in purpose:
+            return _CATEGORY_ERRONEOUS_RETURN, ""
+
+        if _PURPOSE_IP_DEBT in purpose:
+            return _CATEGORY_IP_DEBT, ""
 
         if _PURPOSE_OZON_PLATFORM in purpose:
             merchant = (
@@ -245,21 +318,36 @@ class OzonPdfMapper:
         if _PURPOSE_TIPS in purpose:
             return _CATEGORY_TIPS, ""
 
-        raise ParseError(
-            location=record.location,
-            field="purpose",
-            raw_value=purpose,
-            expected="a supported Ozon purpose",
-        )
+        return _CATEGORY_OTHER, ""
 
     @staticmethod
-    def _sbp_recipient(purpose: str) -> str:
-        """Return the SBP recipient text after ``Получатель:``.
+    def _sbp_party(purpose: str, marker: str) -> str:
+        """Return the sender/recipient text after an SBP marker.
 
-        The recipient ends at ``. Без НДС`` or at the end of the purpose.
+        The party ends at ``. Без НДС`` or at the end of the purpose.
         """
-        after_recipient = purpose.split(_PURPOSE_RECIPIENT, 1)[1]
-        return after_recipient.split(_WITHOUT_VAT_SUFFIX, 1)[0].strip()
+        after_marker = purpose.split(marker, 1)[1]
+        return after_marker.split(_WITHOUT_VAT_SUFFIX, 1)[0].strip()
+
+    @staticmethod
+    def _bill_payee(purpose: str) -> str:
+        """Return the payee after ``Платеж в пользу`` up to a comma."""
+        after_marker = purpose.split(_PURPOSE_BILL_PAYMENT, 1)[1]
+        return after_marker.split(",", 1)[0].strip()
+
+    @staticmethod
+    def _cash_withdrawal_merchant(purpose: str) -> str:
+        """Return the ATM bank for a cash-withdrawal purpose."""
+        if "ОЗОН Банка" in purpose:
+            return "ОЗОН Банк"
+        return ""
+
+    @staticmethod
+    def _incoming_transfer_source(purpose: str) -> str:
+        """Return the card-transfer source bank (e.g. ``T-Bank``)."""
+        if "T-Bank" in purpose:
+            return "T-Bank"
+        return ""
 
     @staticmethod
     def _is_card_payment(purpose: str) -> bool:

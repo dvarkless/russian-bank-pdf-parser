@@ -1,4 +1,4 @@
-# bank-parser 1.0.0
+# bank-parser 1.0.1
 
 **English** | [Русская версия](README.md)
 
@@ -131,9 +131,14 @@ For the **Ozon PDF** statement the values come from the pdfplumber table
 (5 columns): the operation timestamp in column 0 (time dropped); the signed
 amount in column 3, cross-checked against the account-currency amount in
 column 4 when that cell is non-empty; the category and merchant from ordered
-`Назначение платежа` purpose rules on column 2 (SBP transfer recipient,
-own-funds transfer, Ozon platform payment, card payment, tips); the currency is
-`RUR` declared by the adapter; the comment is empty.
+`Назначение платежа` purpose rules on column 2. The rules cover SBP transfers
+(both `Получатель:` and `Отправитель:`), own-funds transfers, Ozon platform
+payments, card payments, tips, and the additional 2026 types (cashback, deposit
+placement/return, card/platform refunds, bank-client transfers, MTS/ТСЖ bill
+payments, cash withdrawal, Card2Card incoming transfers, erroneous/debt
+transfers); a purpose that matches no rule falls back to `Прочие операции`
+instead of blocking the conversion. The currency is `RUR` declared by the
+adapter; the comment is empty.
 
 ---
 
@@ -414,9 +419,11 @@ Exit codes for `verify.py`: `0` pass, `1` mismatch, `2` harness error.
   fallback and is not used for the supported Sber statement.
 - **Ozon PDF extraction is table-based.** `data/input/Ozon.pdf` is 6 pages and
   pdfplumber returns one table per page (49 rows: 2 header rows plus 47 data
-  rows); a record predicate keeps only rows that start with an operation
-  timestamp. The purpose rules are ordered, and an unrecognized purpose raises
-  a location-aware `ParseError` instead of being silently skipped.
+  rows); the larger 2026 statement (`data/input/ozon_2026.pdf`, 84 pages, two
+  statements, **734 operations**) is supported as well. A record predicate
+  keeps only rows that start with an operation timestamp. The purpose rules are
+  ordered; a purpose that matches none of them falls back to `Прочие операции`
+  instead of failing the whole conversion.
 - Output directories are not created automatically; the destination directory
   must exist.
 
