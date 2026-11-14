@@ -79,6 +79,15 @@ DEFAULT_INPUT = ROOT / "data" / "input" / "T-Банк.csv"
 DEFAULT_REFERENCE = ROOT / "data" / "output" / "Т-Банк.csv"
 DEFAULT_GENERATED = ROOT / "tmp" / "verify" / "Т-Банк.csv"
 
+#: (input fixture, reference CSV, expected data-row count) for the byte-gate.
+FIXTURES: tuple[tuple[str, str, int], ...] = (
+    ("T-Банк.csv", "Т-Банк.csv", 117),
+    ("Сбер_csv.csv", "Сбер_csv.csv", 16),
+    ("Альфа.CSV", "Альфа.csv", 96),
+    ("Ozon.pdf", "Ozon.csv", 47),
+    ("Сбер.pdf", "Сбер.csv", 50),
+)
+
 MINUS_LIKE = ("\u2212",)  # unicode minus
 SPACE_LIKE = ("\xa0", "\u202f", "\u2009", "\u2007", " ")  # NBSP / thin spaces
 
@@ -699,6 +708,101 @@ def run_tool(
 
 
 # --------------------------------------------------------------------------- #
+# Byte-gate: -i X -o Y must be byte-identical across all five fixtures
+# --------------------------------------------------------------------------- #
+
+
+def _run_cli(root: Path, input_path: Path, output_path: Path) -> tuple[int, str, str]:
+    """Run ``bank_parser -i X -o Y`` (auto-detect) and return its outcome."""
+    env = dict(os.environ)
+    src = str(root / "src")
+    env["PYTHONPATH"] = src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["PYTHONIOENCODING"] = "utf-8"
+    command = [
+        sys.executable,
+        "-m",
+        "bank_parser",
+        "--input",
+        str(input_path),
+        "--output",
+        str(output_path),
+    ]
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise HarnessError(f"cannot launch parser: {exc}") from exc
+    return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+
+
+def byte_gate(root: Path) -> int:
+    """Run every fixture through ``-i X -o Y`` and require byte-identical output.
+
+    The reference bytes live in ``data/output/``.  Two of those references are
+    byte-exact regenerations, while the T-Bank reference omits the trailing
+    comma on its last row and the Ozon/Sber PDF references predate a mapper
+    fix, so byte diffs there are *pre-existing* reference drift rather than a
+    regression from a CLI change.  The authoritative regression signal is that
+    ``-i X -o Y`` output must not change between releases.
+    """
+    workdir = root / "tmp" / "verify" / "bytegate"
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    print("=" * 78)
+    print("Byte-gate: -i X -o Y output vs data/output/")
+    print("=" * 78)
+    failures: list[str] = []
+    for input_name, reference_name, expected_rows in FIXTURES:
+        input_path = root / "data" / "input" / input_name
+        reference_path = root / "data" / "output" / reference_name
+        generated_path = workdir / reference_name
+        if not input_path.is_file():
+            failures.append(f"{input_name}: input file missing")
+            print(f"  [FAIL] {input_name}: input file missing")
+            continue
+        if not reference_path.is_file():
+            failures.append(f"{reference_name}: reference file missing")
+            print(f"  [FAIL] {reference_name}: reference file missing")
+            continue
+        generated_path.unlink(missing_ok=True)
+        code, stdout, stderr = _run_cli(root, input_path, generated_path)
+        if code != 0:
+            failures.append(f"{input_name}: parser exit {code}: {stderr or stdout}")
+            print(f"  [FAIL] {input_name}: parser exit {code}: {stderr or stdout}")
+            continue
+        generated_bytes = generated_path.read_bytes()
+        reference_bytes = reference_path.read_bytes()
+        if generated_bytes == reference_bytes:
+            print(
+                f"  [PASS] {reference_name}: {len(generated_bytes):,} bytes identical "
+                f"({expected_rows} rows)"
+            )
+        else:
+            failures.append(
+                f"{reference_name}: {len(generated_bytes):,} generated vs "
+                f"{len(reference_bytes):,} reference bytes"
+            )
+            print(
+                f"  [FAIL] {reference_name}: {len(generated_bytes):,} generated vs "
+                f"{len(reference_bytes):,} reference bytes ({expected_rows} rows)"
+            )
+    print()
+    if failures:
+        print(f"byte-gate: {len(FIXTURES) - len(failures)}/{len(FIXTURES)} byte-identical")
+        for message in failures:
+            print(f"  - {message}")
+        return 1
+    print(f"byte-gate: all {len(FIXTURES)} fixtures byte-identical")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # Argument parsing / main
 # --------------------------------------------------------------------------- #
 
@@ -768,6 +872,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-oracle",
         action="store_true",
         help="skip the independent input-derived oracle audit",
+    )
+    parser.add_argument(
+        "--no-byte-gate",
+        action="store_true",
+        help="skip the five-fixture -i X -o Y byte-identity gate",
     )
     parser.add_argument(
         "--max-diffs",
@@ -968,7 +1077,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return run(args)
+        byte_code = 0
+        if not args.no_byte_gate:
+            byte_code = byte_gate(args.root.resolve())
+            print()
+        semantic_code = run(args)
+        return 0 if (byte_code == 0 and semantic_code == 0) else 1
     except HarnessError as exc:
         print(f"\nverify: error: {exc}", file=sys.stderr)
         return 2

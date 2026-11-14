@@ -70,3 +70,22 @@ class Application:
             path=Path(input_path), bank=bank
         )
         return pipeline.read(Path(input_path))
+
+    def detect_bank(
+        self, input_path: Path, *, bank: str | None = None
+    ) -> str:
+        """Return the canonical bank name for *input_path*.
+
+        Args:
+            input_path: Statement file path.
+            bank: Explicit bank name/alias; auto-detected when ``None``.
+
+        Returns:
+            The canonical adapter name (e.g. ``"sber-csv"``).
+
+        Raises:
+            BankParserError: When selection or detection fails.
+            OSError: When the input cannot be read.
+        """
+        adapter, _ = self._factory.create(path=Path(input_path), bank=bank)
+        return adapter.name

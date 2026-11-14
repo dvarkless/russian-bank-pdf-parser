@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
 from . import __version__
 from .banks import supported_banks
+from .completion import SUPPORTED_SHELLS, completion_script
 from .errors import BankParserError
 
 if TYPE_CHECKING:
@@ -32,18 +34,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-i",
         "--input",
-        required=True,
+        default=None,
         metavar="PATH",
         help="input bank export file",
     )
     parser.add_argument(
         "-o",
         "--output",
-        required=True,
+        default=None,
         metavar="PATH",
-        help="output canonical CSV file",
+        help=(
+            "output canonical CSV file; when omitted, "
+            "'<bank>_YYYYMMDD_HHMMSS.csv' is written in the current directory"
+        ),
     )
-    parser.add_argument(
+    bank_group = parser.add_mutually_exclusive_group()
+    bank_group.add_argument(
         "-b",
         "--bank",
         default=None,
@@ -52,6 +58,17 @@ def build_parser() -> argparse.ArgumentParser:
             "bank parser to use; auto-detected when omitted "
             f"(supported: {', '.join(supported_banks())})"
         ),
+    )
+    bank_group.add_argument(
+        "--detect-bank",
+        action="store_true",
+        help="print the detected canonical bank name and exit",
+    )
+    parser.add_argument(
+        "--completion",
+        choices=SUPPORTED_SHELLS,
+        metavar="SHELL",
+        help="print a shell completion script (bash or zsh) and exit",
     )
     parser.add_argument(
         "--version",
@@ -125,15 +142,41 @@ def main(argv: Sequence[str] | None = None) -> int:
             :data:`sys.argv` when ``None``.
 
     Returns:
-        Process exit code: ``0`` on success, ``1`` on handled errors.
+        Process exit code: ``0`` on success, ``1`` on handled errors, ``2``
+        when ``-i/--input`` is missing.
     """
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.completion:
+        print(completion_script(args.completion, banks=supported_banks()))
+        return 0
+    if args.input is None:
+        parser.print_usage(sys.stderr)
+        print(
+            "bank-parser: error: the following arguments are required: "
+            "-i/--input",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         application = build_application()
+        if args.detect_bank:
+            name = application.detect_bank(Path(args.input))
+            print(name)
+            return 0
+        if args.output is None:
+            # The timestamp in the generated filename is a deliberate,
+            # user-requested exception to the deterministic-output rule; the
+            # CSV file CONTENT remains deterministic.
+            bank = application.detect_bank(Path(args.input), bank=args.bank)
+            output = Path(f"{bank}_{datetime.now():%Y%m%d_%H%M%S}.csv")
+        else:
+            output = Path(args.output)
         result = application.convert(
             Path(args.input),
-            Path(args.output),
+            output,
             bank=args.bank,
         )
     except (BankParserError, OSError) as exc:
