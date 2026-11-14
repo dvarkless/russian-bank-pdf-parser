@@ -12,16 +12,16 @@ from bank_parser.cli import main
 
 CANONICAL_HEADER = "account,date,merchant,amount,currency,category,type,comment,"
 DEFAULT_FILENAME_RE = re.compile(
-    r"^(?:tbank|sber-csv|alfa|ozon|sber-pdf)_\d{8}_\d{6}\.csv$"
+    r"^(?:tbank|alfa|ozon|sber)_\d{8}_\d{6}\.csv$"
 )
 
 #: Real fixtures mapped to their canonical ``adapter.name``.
 FIXTURE_BANKS = {
     "T-Банк.csv": "tbank",
-    "Сбер_csv.csv": "sber-csv",
+    "Сбер_csv.csv": "tbank",
     "Альфа.CSV": "alfa",
     "Ozon.pdf": "ozon",
-    "Сбер.pdf": "sber-pdf",
+    "Сбер.pdf": "sber",
 }
 
 

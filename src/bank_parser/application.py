@@ -81,7 +81,7 @@ class Application:
             bank: Explicit bank name/alias; auto-detected when ``None``.
 
         Returns:
-            The canonical adapter name (e.g. ``"sber-csv"``).
+            The canonical adapter name (e.g. ``"sber"``).
 
         Raises:
             BankParserError: When selection or detection fails.

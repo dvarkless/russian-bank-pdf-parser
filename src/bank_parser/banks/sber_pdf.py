@@ -324,7 +324,7 @@ class SberPdfMapper:
 
         Returns:
             The card name, the space-stripped account number, or
-            ``"sber-pdf"``.
+            ``"sber"``.
         """
         card_name = ""
         account_number = ""
@@ -339,7 +339,7 @@ class SberPdfMapper:
             return card_name
         if account_number:
             return account_number
-        return "sber-pdf"
+        return "sber"
 
     @staticmethod
     def _line_location(
@@ -359,12 +359,12 @@ class SberPdfAdapter(BankAdapter):
 
     Detection is filename-first (90), with the first-page body signature
     ``Выписка по платёжному счёту`` + ``СберБанк`` as a 85 fallback.  The
-    Sber CSV and Sber PDF adapters share aliases; the registry's format-aware
-    alias map disambiguates ``.csv`` from ``.pdf`` inputs.
+    ``sber`` canonical name is used for the Sber PDF statement; Sber CSV files
+    route through ``tbank``, whose mapper is identical.
     """
 
-    name = "sber-pdf"
-    aliases = ("sber-pdf", "sber", "сбер", "сбербанк")
+    name = "sber"
+    aliases = ("сбер", "сбербанк", "sber-pdf")
     formats = frozenset({InputFormat.PDF})
     statement_currency = STATEMENT_CURRENCY
     required_headers = ()

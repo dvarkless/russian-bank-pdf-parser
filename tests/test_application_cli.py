@@ -22,15 +22,6 @@ def _write_inline_tbank(path: Path) -> None:
     )
 
 
-def _write_inline_sber17(path: Path) -> None:
-    path.write_text(
-        "Дата операции;Сумма операции;Описание\n"
-        "01.05.2026 10:00:00;-100,00;Shop\n",
-        encoding="utf-8",
-        newline="",
-    )
-
-
 def test_application_convert_returns_pipeline_result(tmp_path):
     source = tmp_path / "in.csv"
     output = tmp_path / "out.csv"
@@ -104,14 +95,6 @@ def test_cli_unknown_bank_exit_one_without_traceback(tmp_path, capsys):
     assert exit_code == 1
     assert "Unsupported bank" in captured.err
     assert "Traceback (most recent call last)" not in captured.err
-
-
-def test_legacy_get_parser_sber_resolves_csv_by_path(tmp_path):
-    source = tmp_path / "sber.csv"
-    _write_inline_sber17(source)
-    txs = get_parser("sber")(source)
-    assert len(txs) == 1
-    assert txs[0].merchant == "Shop"
 
 
 def test_legacy_get_parser_unknown_name_raises():

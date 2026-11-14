@@ -32,8 +32,7 @@ class TbankCsvMapper:
 
     Columns are resolved by header name through
     :class:`~bank_parser.domain.raw.NormalizedTable.layout`, never by position,
-    so reordered or extra columns do not change the result.  The same mapping
-    is reused for the Sber CSV export, whose header is identical.
+    so reordered or extra columns do not change the result.
 
     Date and amount parsing is delegated to the injected pure parsers.  Parser
     failures are re-raised as location-aware
@@ -256,9 +255,8 @@ class TbankCsvAdapter(BankAdapter):
     """Bank adapter for the T-Bank 17-column CSV export.
 
     The T-Bank fixture (``T-Банк.csv``) is semicolon-delimited UTF-8 with a
-    header shared by the Sber CSV export.  Detection is therefore
-    filename-first; the generic header signature only scores 60 so the registry
-    can report a tie instead of silently guessing.
+    generic 17-column Russian header.  Detection is filename-first; the generic
+    header signature only scores 60 because it is not bank-distinctive.
     """
 
     name = "tbank"
@@ -284,8 +282,8 @@ class TbankCsvAdapter(BankAdapter):
 
         Filename markers (``tbank``/``t-bank``, including the compacted
         mixed-script token produced for ``T-Банк``) score 90.  The generic
-        17-column Russian CSV header scores 60 because it is shared with the
-        Sber CSV export.
+        17-column Russian CSV header scores 60 because it is not
+        bank-distinctive.
 
         Args:
             ctx: Cached detection context with lazy filename/header signals.

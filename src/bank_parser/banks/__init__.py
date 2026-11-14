@@ -16,7 +16,6 @@ from ..errors import UnsupportedBankError
 from ..ports.adapter import BankAdapter
 from .alfa_csv import AlfaCsvAdapter
 from .ozon_pdf import OzonPdfAdapter
-from .sber_csv import SberCsvAdapter
 from .sber_pdf import SberPdfAdapter
 from .tbank_csv import TbankCsvAdapter
 
@@ -32,7 +31,6 @@ __all__ = [
 #: Canonical adapter classes, in deterministic registration/detection order.
 BANK_ADAPTERS: tuple[type[BankAdapter], ...] = (
     TbankCsvAdapter,
-    SberCsvAdapter,
     AlfaCsvAdapter,
     SberPdfAdapter,
     OzonPdfAdapter,

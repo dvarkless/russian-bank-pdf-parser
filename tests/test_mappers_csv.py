@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from bank_parser.adapters.normalizers import TableNormalizer
-from bank_parser.adapters.validation import DefaultStatementValidator
 from bank_parser.banks.alfa_csv import AlfaCsvMapper
-from bank_parser.banks.sber_csv import SberCsvAdapter
 from bank_parser.banks.tbank_csv import TbankCsvMapper
 from bank_parser.domain.models import OperationType
 from bank_parser.domain.parsing import RussianAmountParser, RussianDateParser
 from bank_parser.errors import AmountParseError, DateParseError, MissingHeaderError, ParseError
-from bank_parser.ports.adapter import AdapterDependencies
 from helpers import make_raw_table
 
 DATE = RussianDateParser()
@@ -156,27 +152,6 @@ def test_tbank_mapper_bad_amount_error_has_row_number():
         _tbank_mapper().map(
             _normalize(rows, TBANK_HEADER, TbankCsvMapper.REQUIRED_HEADERS)
         )
-
-
-def test_sber_csv_adapter_metadata_and_shared_mapper():
-    deps = AdapterDependencies(
-        date_parser=DATE, amount_parser=AMOUNT,
-        validator=DefaultStatementValidator(),
-    )
-    adapter = SberCsvAdapter(deps)
-    assert adapter.name == "sber-csv"
-    assert "sber" in adapter.aliases
-    row = _tbank_row({
-        "Дата операции": "01.05.2026", "Сумма операции": "-10,00",
-        "Описание": "Sber", "Валюта операции": "RUB",
-        "Категория по-умолчанию": "Food",
-    })
-    normalized = _normalize([row], TBANK_HEADER, TbankCsvMapper.REQUIRED_HEADERS)
-    sber_tx = adapter.create_mapper().map(normalized)[0]
-    tbank_tx = _tbank_mapper().map(normalized)[0]
-    assert sber_tx.account == "sber-csv"
-    assert tbank_tx.account == "tbank"
-    assert replace(sber_tx, account="") == replace(tbank_tx, account="")
 
 
 def test_alfa_mapper_uses_operation_date_not_transaction_date():

@@ -151,4 +151,4 @@ def test_sber_pdf_account_priority_card_name_number_bank_name():
 
     # Neither marker present falls back to the canonical bank name.
     tx = _mapper().map(_normalized([(1, HEADER), (1, DESCRIPTION)]))[0]
-    assert tx.account == "sber-pdf"
+    assert tx.account == "sber"
