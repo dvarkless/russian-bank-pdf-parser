@@ -118,7 +118,7 @@ def test_transaction_location_default_and_positional_legacy_fields():
     assert tx.location is None
     assert tuple(tx.__dataclass_fields__) == (
         "date", "merchant", "amount", "currency", "category",
-        "operation_type", "comment", "location",
+        "operation_type", "comment", "location", "account",
     )
 
 

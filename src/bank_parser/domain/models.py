@@ -161,6 +161,7 @@ class Transaction:
         operation_type: Debit or credit derived from the signed source amount.
         comment: Free-form source comment; may be empty.
         location: Diagnostics-only origin; never written to the output.
+        account: Human-readable account/card name or number; may be empty.
     """
 
     date: date
@@ -171,6 +172,7 @@ class Transaction:
     operation_type: OperationType
     comment: str
     location: SourceLocation | None = None
+    account: str = ""
 
     @classmethod
     def from_money(
@@ -182,6 +184,7 @@ class Transaction:
         category: str,
         comment: str = "",
         location: SourceLocation | None = None,
+        account: str = "",
     ) -> Transaction:
         """Build a transaction from a signed :class:`Money` value.
 
@@ -193,6 +196,7 @@ class Transaction:
             category: Category assigned by the bank.
             comment: Free-form source comment.
             location: Diagnostics-only origin.
+            account: Human-readable account/card name or number.
 
         Returns:
             A transaction with an absolute ``amount`` and an ``OperationType``.
@@ -206,4 +210,5 @@ class Transaction:
             operation_type=money.operation_type,
             comment=comment,
             location=location,
+            account=account,
         )

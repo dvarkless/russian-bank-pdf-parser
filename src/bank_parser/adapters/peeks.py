@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
 from ..errors import BankParserError
 from ..ports.source import TableReader
 
-__all__ = ["PandasCsvPeek", "PdfPlumberPdfPeek"]
+__all__ = [
+    "PandasCsvPeek",
+    "PdfPlumberPdfPeek",
+    "read_ozon_account",
+]
 
 logger = logging.getLogger(__name__)
+
+#: Ozon page-1 account marker: ``Номер лицевого счёта: № <20 digits>``.
+_OZON_ACCOUNT_RE = re.compile(r"Номер лицевого счёта:\s*№\s*(\d{20})")
 
 
 class PandasCsvPeek:
@@ -163,3 +171,34 @@ class PdfPlumberPdfPeek:
         except (PyPdfError, ValueError, TypeError, AttributeError) as exc:
             logger.debug("pypdf text peek failed for %s: %s", path, exc)
             return None
+
+
+def read_ozon_account(path: Path) -> str:
+    """Return the Ozon account number from page 1 of *path*, or ``""``.
+
+    This is best-effort enrichment: a missing or unreadable PDF, or a first
+    page without the ``Номер лицевого счёта`` marker, yields an empty string
+    so callers can fall back to the canonical bank name.
+
+    Args:
+        path: PDF file path.
+
+    Returns:
+        The 20-digit account number, or ``""`` when it cannot be read.
+    """
+    try:
+        import pdfplumber
+    except ImportError:  # pragma: no cover - dependency is declared
+        return ""
+
+    try:
+        with pdfplumber.open(str(path)) as pdf:
+            if not pdf.pages:
+                return ""
+            text = pdf.pages[0].extract_text() or ""
+    except Exception as exc:  # noqa: BLE001 - best-effort reader, never raise
+        logger.debug("Ozon account peek failed for %s: %s", path, exc)
+        return ""
+
+    match = _OZON_ACCOUNT_RE.search(text)
+    return match.group(1) if match else ""

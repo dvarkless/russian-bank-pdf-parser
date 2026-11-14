@@ -10,7 +10,7 @@ import pytest
 
 from bank_parser.cli import main
 
-CANONICAL_HEADER = "date,merchant,amount,currency,category,type,comment,"
+CANONICAL_HEADER = "account,date,merchant,amount,currency,category,type,comment,"
 DEFAULT_FILENAME_RE = re.compile(
     r"^(?:tbank|sber-csv|alfa|ozon|sber-pdf)_\d{8}_\d{6}\.csv$"
 )
@@ -49,11 +49,12 @@ def _assert_canonical_csv(path: Path, expected_transactions: int) -> None:
     assert len(rows) == expected_transactions + 1
     for row in rows[1:]:
         fields = row.split(",")
-        assert len(fields) == 8
-        assert fields[7] == ""
-        assert re.fullmatch(r"\d{2}/\d{2}/\d{4}", fields[0])
-        assert re.fullmatch(r"\d+\.\d{2}", fields[2])
-        assert fields[5] in ("Списание", "Пополнение")
+        assert len(fields) == 9
+        assert fields[0] != ""
+        assert fields[8] == ""
+        assert re.fullmatch(r"\d{2}/\d{2}/\d{4}", fields[1])
+        assert re.fullmatch(r"\d+\.\d{2}", fields[3])
+        assert fields[6] in ("Списание", "Пополнение")
 
 
 @pytest.mark.skipif(

@@ -59,6 +59,11 @@ _DESCRIPTION_PREFIX = re.compile(r"^\d{2}\.\d{2}\.\d{4}\s+\d{6}(?:\s|$)")
 #: Characters removed from the end of a merchant (dots and spaces only).
 _TRAILING_MERCHANT_CHARS = " ."
 
+#: Page-1 marker for the card name (account priority 1.1).
+_CARD_NAME_MARKER = "Карты, привязанные к счёту"
+#: Page-1 marker for the account number (account priority 1.2).
+_ACCOUNT_NUMBER_MARKER = "Номер счёта"
+
 
 @dataclass(frozen=True, slots=True)
 class _PendingOperation:
@@ -107,7 +112,8 @@ class SberPdfMapper:
         transaction, in page/line order.  A header followed by another header
         (or by end of document) has no description and raises a
         :class:`~bank_parser.errors.ParseError`; so does a description without
-        a usable merchant.
+        a usable merchant.  A single account label, resolved from the page-1
+        card/account markers, is applied to every transaction.
 
         Args:
             document: Normalised text produced by a ``TextNormalizer``.
@@ -127,6 +133,7 @@ class SberPdfMapper:
                 f"{type(document).__name__}"
             )
 
+        account = self._resolve_account(document)
         transactions: list[Transaction] = []
         pending: _PendingOperation | None = None
         for raw_line in document.lines:
@@ -154,6 +161,7 @@ class SberPdfMapper:
                         pending,
                         description,
                         data_row=len(transactions) + 1,
+                        account=account,
                     )
                 )
                 pending = None
@@ -258,6 +266,7 @@ class SberPdfMapper:
         match: re.Match[str],
         *,
         data_row: int,
+        account: str,
     ) -> Transaction:
         """Build a transaction from a pending header and its description.
 
@@ -267,6 +276,7 @@ class SberPdfMapper:
             pending: Operation parsed from the preceding header line.
             match: Successful match of the description pattern.
             data_row: 1-based transaction number in the output.
+            account: Account label resolved from the page-1 markers.
 
         Returns:
             The canonical transaction.
@@ -299,7 +309,37 @@ class SberPdfMapper:
             category=pending.category,
             comment="",
             location=location,
+            account=account,
         )
+
+    def _resolve_account(self, document: NormalizedText) -> str:
+        """Resolve the account label by priority: card name, number, bank name.
+
+        Scans the normalised lines once for the two page-1 markers: the card
+        name (``Карты, привязанные к счёту``) wins over the account number
+        (``Номер счёта``); the canonical bank name is the final fallback.
+
+        Args:
+            document: Normalised text lines.
+
+        Returns:
+            The card name, the space-stripped account number, or
+            ``"sber-pdf"``.
+        """
+        card_name = ""
+        account_number = ""
+        for raw_line in document.lines:
+            text = raw_line.text
+            if not card_name and _CARD_NAME_MARKER in text:
+                card_name = text.split(_CARD_NAME_MARKER, 1)[1].strip()
+            if not account_number and _ACCOUNT_NUMBER_MARKER in text:
+                after = text.split(_ACCOUNT_NUMBER_MARKER, 1)[1]
+                account_number = "".join(after.split())
+        if card_name:
+            return card_name
+        if account_number:
+            return account_number
+        return "sber-pdf"
 
     @staticmethod
     def _line_location(

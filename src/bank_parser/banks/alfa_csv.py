@@ -61,10 +61,15 @@ class AlfaCsvMapper:
     COMMENT_HEADER = "comment"
     TYPE_HEADER = "type"
     STATUS_HEADER = "status"
+    CARD_NAME_HEADER = "cardName"
+    ACCOUNT_NAME_HEADER = "accountName"
+    ACCOUNT_NUMBER_HEADER = "accountNumber"
+    CARD_NUMBER_HEADER = "cardNumber"
 
     DEBIT_TYPE = "Списание"
     CREDIT_TYPE = "Пополнение"
     TYPE_EXPECTED = "Списание or Пополнение"
+    ACCOUNT_FALLBACK = "alfa"
 
     REQUIRED_HEADERS: ClassVar[tuple[str, ...]] = (
         OPERATION_DATE_HEADER,
@@ -135,6 +140,18 @@ class AlfaCsvMapper:
         index_category = layout.index_of(self.CATEGORY_HEADER)
         index_comment = layout.index_of(self.COMMENT_HEADER)
         index_type = layout.index_of(self.TYPE_HEADER)
+        index_card_name = layout.index_of(self.CARD_NAME_HEADER)
+        index_account_name = layout.index_of(self.ACCOUNT_NAME_HEADER)
+        index_account_number = layout.index_of(self.ACCOUNT_NUMBER_HEADER)
+        index_card_number = layout.index_of(self.CARD_NUMBER_HEADER)
+
+        account = self._resolve_account(
+            document,
+            index_card_name=index_card_name,
+            index_account_name=index_account_name,
+            index_account_number=index_account_number,
+            index_card_number=index_card_number,
+        )
 
         transactions: list[Transaction] = []
         for record in document.records:
@@ -151,6 +168,7 @@ class AlfaCsvMapper:
                     index_category=index_category,
                     index_comment=index_comment,
                     index_type=index_type,
+                    account=account,
                 )
             )
         return transactions
@@ -167,6 +185,44 @@ class AlfaCsvMapper:
             return document.records[0].location
         return SourceLocation(path=Path("<table>"), format=InputFormat.CSV)
 
+    def _resolve_account(
+        self,
+        document: NormalizedTable,
+        *,
+        index_card_name: int | None,
+        index_account_name: int | None,
+        index_account_number: int | None,
+        index_card_number: int | None,
+    ) -> str:
+        """Resolve the single file-level Alfa account name.
+
+        The first non-empty value across all records wins, by priority:
+        ``cardName``, ``accountName``, ``accountNumber``, ``cardNumber``, then
+        the ``"alfa"`` fallback.
+
+        Args:
+            document: Normalised table to scan.
+            index_card_name: Column index of ``cardName`` or ``None``.
+            index_account_name: Column index of ``accountName`` or ``None``.
+            index_account_number: Column index of ``accountNumber`` or
+                ``None``.
+            index_card_number: Column index of ``cardNumber`` or ``None``.
+
+        Returns:
+            The resolved account value shared by every record.
+        """
+        for index in (
+            index_card_name,
+            index_account_name,
+            index_account_number,
+            index_card_number,
+        ):
+            for record in document.records:
+                value = _cell(record, index).strip()
+                if value:
+                    return value
+        return self.ACCOUNT_FALLBACK
+
     def _map_record(
         self,
         record: RawRecord,
@@ -179,6 +235,7 @@ class AlfaCsvMapper:
         index_category: int | None,
         index_comment: int | None,
         index_type: int | None,
+        account: str,
     ) -> Transaction:
         """Map one normalised record to a transaction.
 
@@ -193,6 +250,7 @@ class AlfaCsvMapper:
             index_category: Column index of ``category`` or ``None``.
             index_comment: Column index of ``comment`` or ``None``.
             index_type: Column index of ``type``.
+            account: File-level account value shared by every record.
 
         Returns:
             The canonical transaction.
@@ -265,6 +323,7 @@ class AlfaCsvMapper:
             operation_type=operation_type,
             comment=_cell(record, index_comment).strip(),
             location=record.location,
+            account=account,
         )
 
 

@@ -28,9 +28,9 @@ Semantic rules
 Extra checks
 ------------
 * Canonical format checks on the *generated* file: UTF-8 BOM, LF-only, exact
-  header, 8 fields per row, empty 8th placeholder, 2-decimal amounts,
-  DD/MM/YYYY dates, valid operation types, no trailing whitespace, no blank
-  rows, final newline.
+  header (account first), 9 fields per row, empty 9th placeholder, 2-decimal
+  amounts, DD/MM/YYYY dates, valid operation types, no trailing whitespace, no
+  blank rows, final newline.
 * An independent oracle derived from the input export (implemented here from
   ``docs/spec.md``, not from the package under test) is used to tell a real
   parser bug from a manual typo in the handwritten reference.  A difference
@@ -63,8 +63,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 BOM = codecs.BOM_UTF8
-HEADER = ["date", "merchant", "amount", "currency", "category", "type", "comment", ""]
-FIELDS = ("date", "merchant", "amount", "currency", "category", "type", "comment")
+HEADER = ["account", "date", "merchant", "amount", "currency", "category", "type", "comment", ""]
+FIELDS = ("account", "date", "merchant", "amount", "currency", "category", "type", "comment")
 TYPE_DEBIT = "Списание"
 TYPE_CREDIT = "Пополнение"
 TYPES = (TYPE_DEBIT, TYPE_CREDIT)
@@ -103,12 +103,12 @@ class HarnessError(Exception):
 
 @dataclass
 class Record:
-    """One data row, already split into the 7 semantic fields."""
+    """One data row, already split into the 8 semantic fields."""
 
     values: dict[str, str]
     placeholder: str = ""
     extra_fields: list[str] = field(default_factory=list)
-    raw_field_count: int = 8
+    raw_field_count: int = 9
 
     def pretty(self) -> str:
         parts = [f"{name}={self.values.get(name, '')!r}" for name in FIELDS]
@@ -136,7 +136,7 @@ class Diff:
             )
         if self.kind == "placeholder":
             return (
-                f"row {self.row}: 8th placeholder field: "
+                f"row {self.row}: 9th placeholder field: "
                 f"generated={self.generated!r} reference={self.reference!r}"
             )
         if self.kind == "missing_row":
@@ -321,13 +321,13 @@ def byte_stats(data: bytes) -> dict[str, object]:
 def records_from_rows(rows: list[list[str]]) -> list[Record]:
     records: list[Record] = []
     for raw_row in rows:
-        padded = (raw_row + [""] * 7)[:7]
+        padded = (raw_row + [""] * 8)[:8]
         values = {name: strip_outer(padded[index]) for index, name in enumerate(FIELDS)}
         placeholder = (
-            strip_outer(raw_row[7]) if len(raw_row) > 7 else ""
+            strip_outer(raw_row[8]) if len(raw_row) > 8 else ""
         )
         extra_fields = (
-            [strip_outer(cell) for cell in raw_row[8:]] if len(raw_row) > 8 else []
+            [strip_outer(cell) for cell in raw_row[9:]] if len(raw_row) > 9 else []
         )
         records.append(
             Record(
@@ -420,7 +420,11 @@ def derive_expected(input_path: Path) -> tuple[list[Record], dict[str, object]]:
         category = strip_outer(get(row, "Категория по-умолчанию")) or strip_outer(
             get(row, "Ваша категория")
         )
+        account = strip_outer(get(row, "Имя счёта")) or strip_outer(
+            get(row, "Номер карты")
+        ) or "tbank"
         values = {
+            "account": account,
             "date": parsed_date.strftime(OUTPUT_DATE_FORMAT),
             "merchant": get(row, "Описание"),
             "amount": format_amount(abs(signed_amount)),
@@ -552,29 +556,39 @@ def canonical_checks(
     check("single final newline", data.endswith(b"\n") and not data.endswith(b"\n\n"))
     check("no NUL bytes", b"\x00" not in data)
     check("delimiter is ','", delimiter == ",")
-    check("exact 8-field header", header == HEADER, f"header={header!r}")
+    check("exact 9-field header", header == HEADER, f"header={header!r}")
     check("no blank rows", blank_rows == 0, f"{blank_rows} blank row(s)")
     check("no trailing whitespace", byte_stats(data)["trailing_ws_lines"] == 0)
 
-    bad_lengths = [i for i, row in enumerate(data_rows, 1) if len(row) != 8]
+    bad_lengths = [i for i, row in enumerate(data_rows, 1) if len(row) != 9]
     check(
-        "8 fields in every data row",
+        "9 fields in every data row",
         not bad_lengths,
         f"rows with bad field counts: {bad_lengths[:20]}",
     )
 
     bad_placeholder = [
-        i for i, row in enumerate(data_rows, 1) if len(row) > 7 and row[7] != ""
+        i for i, row in enumerate(data_rows, 1) if len(row) > 8 and row[8] != ""
     ]
     check(
-        "8th placeholder field always empty",
+        "9th placeholder field always empty",
         not bad_placeholder,
         f"rows with non-empty placeholder: {bad_placeholder[:20]}",
     )
 
+    bad_accounts = [
+        (i, row[0]) for i, row in enumerate(data_rows, 1)
+        if len(row) < 1 or not row[0].strip()
+    ]
+    check(
+        "account field non-empty in every data row",
+        not bad_accounts,
+        f"rows with empty account: {bad_accounts[:20]}",
+    )
+
     bad_amounts = [
-        (i, row[2]) for i, row in enumerate(data_rows, 1)
-        if len(row) < 3 or not AMOUNT_RE.match(row[2])
+        (i, row[3]) for i, row in enumerate(data_rows, 1)
+        if len(row) < 4 or not AMOUNT_RE.match(row[3])
     ]
     check(
         "amounts are absolute with exactly 2 decimals",
@@ -583,8 +597,8 @@ def canonical_checks(
     )
 
     bad_dates = [
-        (i, row[0]) for i, row in enumerate(data_rows, 1)
-        if len(row) < 1 or parse_date(row[0], (OUTPUT_DATE_FORMAT,)) is None
+        (i, row[1]) for i, row in enumerate(data_rows, 1)
+        if len(row) < 2 or parse_date(row[1], (OUTPUT_DATE_FORMAT,)) is None
     ]
     check(
         "dates are DD/MM/YYYY",
@@ -593,8 +607,8 @@ def canonical_checks(
     )
 
     bad_types = [
-        (i, row[5]) for i, row in enumerate(data_rows, 1)
-        if len(row) < 6 or row[5] not in TYPES
+        (i, row[6]) for i, row in enumerate(data_rows, 1)
+        if len(row) < 7 or row[6] not in TYPES
     ]
     check(
         "types are Списание/Пополнение",
@@ -624,7 +638,7 @@ def reference_audit(
     data_rows = rows[1:] if rows else []
     if blank_rows:
         notes.append(f"{blank_rows} blank row(s) present (ignored by comparison)")
-    bad_lengths = [(i, len(row)) for i, row in enumerate(data_rows, 1) if len(row) != 8]
+    bad_lengths = [(i, len(row)) for i, row in enumerate(data_rows, 1) if len(row) != 9]
     if bad_lengths:
         shown = ", ".join(f"row {i}: {n} fields" for i, n in bad_lengths[:20])
         extra = "" if len(bad_lengths) <= 20 else f" (+{len(bad_lengths) - 20} more)"
@@ -636,7 +650,7 @@ def reference_audit(
     seen: dict[tuple[str, ...], int] = {}
     duplicates: list[int] = []
     for index, row in enumerate(data_rows, 1):
-        key = tuple(strip_outer(cell) for cell in row[:7])
+        key = tuple(strip_outer(cell) for cell in row[:8])
         if key in seen:
             duplicates.append(index)
         else:
@@ -934,7 +948,7 @@ def run(args: argparse.Namespace) -> int:
         raise HarnessError(f"reference file has no rows: {reference_path}")
 
     ref_header = [strip_outer(cell) for cell in ref_rows[0]]
-    if ref_header[:7] != HEADER[:7]:
+    if ref_header[:8] != HEADER[:8]:
         raise HarnessError(
             "reference header does not match the canonical field names; "
             f"got {ref_header!r}"

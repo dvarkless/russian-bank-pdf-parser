@@ -45,9 +45,10 @@ def test_application_convert_returns_pipeline_result(tmp_path):
     assert output.read_bytes().startswith(codecs.BOM_UTF8)
     rows = output.read_text(encoding="utf-8-sig").splitlines()
     assert len(rows) == 3
-    assert rows[0] == "date,merchant,amount,currency,category,type,comment,"
-    assert rows[1].split(",")[:3] == ["01/05/2026", "Shop", "100.00"]
-    assert rows[2].split(",")[5] == "Пополнение"
+    assert rows[0] == "account,date,merchant,amount,currency,category,type,comment,"
+    assert rows[1].split(",")[0] == "tbank"
+    assert rows[1].split(",")[1:4] == ["01/05/2026", "Shop", "100.00"]
+    assert rows[2].split(",")[6] == "Пополнение"
 
 
 def test_application_read_transactions_does_not_write_output(tmp_path):

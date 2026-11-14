@@ -51,6 +51,8 @@ class TbankCsvMapper:
     CATEGORY_HEADER = "Категория по-умолчанию"
     USER_CATEGORY_HEADER = "Ваша категория"
     COMMENT_HEADER = "Сообщение"
+    ACCOUNT_NAME_HEADER = "Имя счёта"
+    CARD_NUMBER_HEADER = "Номер карты"
 
     REQUIRED_HEADERS: ClassVar[tuple[str, ...]] = (
         DATE_HEADER,
@@ -59,16 +61,22 @@ class TbankCsvMapper:
     )
 
     def __init__(
-        self, date_parser: DateParser, amount_parser: AmountParser
+        self,
+        date_parser: DateParser,
+        amount_parser: AmountParser,
+        account_fallback: str = "tbank",
     ) -> None:
         """Initialise the mapper with its injected value parsers.
 
         Args:
             date_parser: Context-free parser for operation dates.
             amount_parser: Context-free parser for signed operation amounts.
+            account_fallback: Account value used when neither an account name
+                nor a card number is present on a record.
         """
         self._date_parser = date_parser
         self._amount_parser = amount_parser
+        self._account_fallback = account_fallback
 
     def map(self, document: NormalizedDocument) -> list[Transaction]:
         """Map a normalised T-Bank table to transactions.
@@ -117,6 +125,8 @@ class TbankCsvMapper:
         index_user_category = layout.index_of(self.USER_CATEGORY_HEADER)
         index_message = layout.index_of(self.COMMENT_HEADER)
         index_description = layout.index_of(self.DESCRIPTION_HEADER)
+        index_account_name = layout.index_of(self.ACCOUNT_NAME_HEADER)
+        index_card_number = layout.index_of(self.CARD_NUMBER_HEADER)
 
         transactions: list[Transaction] = []
         for record in document.records:
@@ -133,6 +143,8 @@ class TbankCsvMapper:
                     index_category=index_category,
                     index_user_category=index_user_category,
                     index_message=index_message,
+                    index_account_name=index_account_name,
+                    index_card_number=index_card_number,
                 )
             )
         return transactions
@@ -161,6 +173,8 @@ class TbankCsvMapper:
         index_category: int | None,
         index_user_category: int | None,
         index_message: int | None,
+        index_account_name: int | None,
+        index_card_number: int | None,
     ) -> Transaction:
         """Map one normalised record to a transaction.
 
@@ -177,6 +191,8 @@ class TbankCsvMapper:
             index_user_category: Column index of ``Ваша категория`` or
                 ``None``.
             index_message: Column index of ``Сообщение`` or ``None``.
+            index_account_name: Column index of ``Имя счёта`` or ``None``.
+            index_card_number: Column index of ``Номер карты`` or ``None``.
 
         Returns:
             The canonical transaction.
@@ -219,6 +235,12 @@ class TbankCsvMapper:
         if not category:
             category = _cell(record, index_user_category).strip()
 
+        account = _cell(record, index_account_name).strip()
+        if not account:
+            account = _cell(record, index_card_number).strip()
+        if not account:
+            account = self._account_fallback
+
         return Transaction.from_money(
             date=operation_date,
             merchant=_cell(record, index_description).strip(),
@@ -226,6 +248,7 @@ class TbankCsvMapper:
             category=category,
             comment=_cell(record, index_message).strip(),
             location=record.location,
+            account=account,
         )
 
 

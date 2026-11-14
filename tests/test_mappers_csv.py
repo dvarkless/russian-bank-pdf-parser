@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -171,7 +172,11 @@ def test_sber_csv_adapter_metadata_and_shared_mapper():
         "Категория по-умолчанию": "Food",
     })
     normalized = _normalize([row], TBANK_HEADER, TbankCsvMapper.REQUIRED_HEADERS)
-    assert adapter.create_mapper().map(normalized) == _tbank_mapper().map(normalized)
+    sber_tx = adapter.create_mapper().map(normalized)[0]
+    tbank_tx = _tbank_mapper().map(normalized)[0]
+    assert sber_tx.account == "sber-csv"
+    assert tbank_tx.account == "tbank"
+    assert replace(sber_tx, account="") == replace(tbank_tx, account="")
 
 
 def test_alfa_mapper_uses_operation_date_not_transaction_date():
@@ -253,3 +258,68 @@ def test_alfa_mapper_missing_required_header():
         AlfaCsvMapper(DATE, AMOUNT).map(
             _normalize([row], header, AlfaCsvMapper.REQUIRED_HEADERS)
         )
+
+
+def test_tbank_mapper_account_priority_name_number_fallback():
+    rows = [
+        _tbank_row({
+            "Имя счёта": "Black", "Номер карты": "*1111",
+            "Дата операции": "01.05.2026", "Сумма операции": "-1,00",
+            "Описание": "Name",
+        }),
+        _tbank_row({
+            "Номер карты": "*2222",
+            "Дата операции": "02.05.2026", "Сумма операции": "-2,00",
+            "Описание": "Number",
+        }),
+        _tbank_row({
+            "Дата операции": "03.05.2026", "Сумма операции": "-3,00",
+            "Описание": "Fallback",
+        }),
+    ]
+    txs = _tbank_mapper().map(
+        _normalize(rows, TBANK_HEADER, TbankCsvMapper.REQUIRED_HEADERS)
+    )
+    assert [tx.account for tx in txs] == ["Black", "*2222", "tbank"]
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({"cardName": "Альфа-карта МИР", "accountName": "Текущий счёт",
+          "accountNumber": "111", "cardNumber": "222"}, "Альфа-карта МИР"),
+        ({"accountName": "Текущий счёт", "accountNumber": "111",
+          "cardNumber": "222"}, "Текущий счёт"),
+        ({"accountNumber": "111", "cardNumber": "222"}, "111"),
+        ({"cardNumber": "222"}, "222"),
+        ({}, "alfa"),
+    ],
+)
+def test_alfa_mapper_account_file_level_priority(values, expected):
+    row = _alfa_row({
+        **values,
+        "operationDate": "01.11.2026", "merchant": "M",
+        "amount": "10", "currency": "RUR", "type": "Списание",
+    })
+    tx = AlfaCsvMapper(DATE, AMOUNT).map(
+        _normalize([row], ALFA_HEADER, AlfaCsvMapper.REQUIRED_HEADERS)
+    )[0]
+    assert tx.account == expected
+
+
+def test_alfa_mapper_account_is_file_level_and_uniform():
+    rows = [
+        _alfa_row({
+            "operationDate": "01.11.2026", "merchant": "NoCard",
+            "amount": "10", "currency": "RUR", "type": "Списание",
+        }),
+        _alfa_row({
+            "cardName": "Альфа-карта МИР",
+            "operationDate": "02.11.2026", "merchant": "WithCard",
+            "amount": "10", "currency": "RUR", "type": "Списание",
+        }),
+    ]
+    txs = AlfaCsvMapper(DATE, AMOUNT).map(
+        _normalize(rows, ALFA_HEADER, AlfaCsvMapper.REQUIRED_HEADERS)
+    )
+    assert [tx.account for tx in txs] == ["Альфа-карта МИР", "Альфа-карта МИР"]

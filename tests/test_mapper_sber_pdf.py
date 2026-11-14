@@ -125,3 +125,30 @@ def test_sber_pdf_keeps_page_and_line_for_descriptions():
     )[0]
     assert tx.location.page == 2
     assert tx.location.physical_row == 3
+
+
+def test_sber_pdf_account_priority_card_name_number_bank_name():
+    # Card name (page-1 marker) wins over the account number.
+    tx = _mapper().map(
+        _normalized([
+            (1, "Карты, привязанные к счёту МИР Сберкарта •• 5838"),
+            (1, "Номер счёта 40817810362002985685"),
+            (1, HEADER),
+            (1, DESCRIPTION),
+        ])
+    )[0]
+    assert tx.account == "МИР Сберкарта •• 5838"
+
+    # Number-only falls back to the space-stripped account number.
+    tx = _mapper().map(
+        _normalized([
+            (1, "Номер счёта 40817810362002985685"),
+            (1, HEADER),
+            (1, DESCRIPTION),
+        ])
+    )[0]
+    assert tx.account == "40817810362002985685"
+
+    # Neither marker present falls back to the canonical bank name.
+    tx = _mapper().map(_normalized([(1, HEADER), (1, DESCRIPTION)]))[0]
+    assert tx.account == "sber-pdf"

@@ -1,4 +1,4 @@
-"""Canonical CSV writer: UTF-8 with BOM, LF, eight fields per row."""
+"""Canonical CSV writer: UTF-8 with BOM, LF, nine fields per row."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ class CanonicalCsvWriter:
     """
 
     HEADER: tuple[str, ...] = (
+        "account",
         "date",
         "merchant",
         "amount",
@@ -72,6 +73,7 @@ class CanonicalCsvWriter:
                 for transaction in transactions:
                     writer.writerow(
                         [
+                            transaction.account,
                             transaction.date.strftime(self.DATE_FORMAT),
                             transaction.merchant,
                             self.format_amount(transaction.amount),

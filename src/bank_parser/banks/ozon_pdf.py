@@ -11,8 +11,10 @@ rows, and :class:`OzonPdfMapper` applies the ordered purpose rules from
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from typing import ClassVar
 
 from ..domain.models import InputFormat, Money, Transaction
@@ -128,6 +130,7 @@ class OzonPdfMapper:
         amount_parser: AmountParser,
         *,
         currency: str = STATEMENT_CURRENCY,
+        account_reader: Callable[[Path], str] | None = None,
     ) -> None:
         """Initialise the mapper with injected parsers and the currency code.
 
@@ -135,10 +138,14 @@ class OzonPdfMapper:
             date_parser: Context-free parser for operation timestamps.
             amount_parser: Context-free parser for signed amounts.
             currency: Currency code applied to every transaction (``"RUR"``).
+            account_reader: Optional reader that returns the Ozon account
+                number from the source PDF path; when omitted, the canonical
+                bank name is used instead.
         """
         self._date_parser = date_parser
         self._amount_parser = amount_parser
         self._currency = currency
+        self._account_reader = account_reader
 
     def map(self, document: NormalizedDocument) -> list[Transaction]:
         """Map a normalised Ozon table to transactions.
@@ -146,7 +153,9 @@ class OzonPdfMapper:
         Every record yields exactly one transaction, in input order.  The
         date is the operation timestamp (time dropped); the amount comes from
         the RUB column (the account-currency column is cross-checked when
-        present); the purpose is classified by the ordered rules.
+        present); the purpose is classified by the ordered rules; a single
+        account label, resolved from the statement's first page, is applied
+        to every row.
 
         Args:
             document: Normalised table produced by the Ozon ``TableNormalizer``.
@@ -166,6 +175,7 @@ class OzonPdfMapper:
                 f"{type(document).__name__}"
             )
 
+        account = self._resolve_account(document)
         transactions: list[Transaction] = []
         for record in document.records:
             raw_date = record.cell(self.DATE_COLUMN)
@@ -230,9 +240,29 @@ class OzonPdfMapper:
                     category=category,
                     comment="",
                     location=record.location,
+                    account=account,
                 )
             )
         return transactions
+
+    def _resolve_account(self, document: NormalizedTable) -> str:
+        """Return the Ozon account label applied to every transaction.
+
+        The source path is taken from the first record's location; the
+        injected account reader extracts the ``Номер лицевого счёта`` number
+        from page 1. An unreadable account falls back to the bank name.
+
+        Args:
+            document: Normalised table whose records carry the source path.
+
+        Returns:
+            The account number, or ``"ozon"`` when it cannot be read.
+        """
+        if self._account_reader is None or not document.records:
+            return "ozon"
+        path = document.records[0].location.path
+        account = self._account_reader(path).strip()
+        return account or "ozon"
 
     def _classify_purpose(self, purpose: str) -> tuple[str, str]:
         """Return ``(category, merchant)`` for a normalised purpose.
@@ -450,9 +480,14 @@ class OzonPdfAdapter(BankAdapter):
         )
 
     def create_mapper(self) -> RowMapper:
-        """Return an Ozon mapper wired with the injected parsers."""
+        """Return an Ozon mapper wired with the injected parsers and reader."""
+        # Imported lazily: the adapter owns the pdfplumber peek boundary and
+        # must not load it from the package import path.
+        from ..adapters.peeks import read_ozon_account
+
         return OzonPdfMapper(
             self._deps.date_parser,
             self._deps.amount_parser,
             currency=self.statement_currency,
+            account_reader=read_ozon_account,
         )

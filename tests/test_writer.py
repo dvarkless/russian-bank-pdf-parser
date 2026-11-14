@@ -37,7 +37,7 @@ def _tx(
     )
 
 
-def test_writer_exact_bytes_header_bom_lf_and_8_fields(tmp_path):
+def test_writer_exact_bytes_header_bom_lf_and_9_fields(tmp_path):
     path = tmp_path / "out.csv"
     count = CanonicalCsvWriter().write(
         [_tx(), _tx(day=2, amount="0.00", operation_type=OperationType.CREDIT)],
@@ -49,14 +49,14 @@ def test_writer_exact_bytes_header_bom_lf_and_8_fields(tmp_path):
     assert b"\r" not in data
     assert data.endswith(b"\n")
     lines = data.decode("utf-8-sig").splitlines()
-    assert lines[0] == "date,merchant,amount,currency,category,type,comment,"
+    assert lines[0] == "account,date,merchant,amount,currency,category,type,comment,"
     assert len(lines) == 3
     assert lines[1].split(",") == [
-        "01/05/2026", "Shop", "10.50", "RUB", "Food", "Списание", "", "",
+        "", "01/05/2026", "Shop", "10.50", "RUB", "Food", "Списание", "", "",
     ]
-    assert lines[2].split(",")[2] == "0.00"
-    assert lines[2].split(",")[5] == "Пополнение"
-    assert all(len(next(csv.reader([line]))) == 8 for line in lines)
+    assert lines[2].split(",")[3] == "0.00"
+    assert lines[2].split(",")[6] == "Пополнение"
+    assert all(len(next(csv.reader([line]))) == 9 for line in lines)
 
 
 def test_writer_uses_enum_value_not_str_enum_representation(tmp_path):
@@ -70,14 +70,14 @@ def test_writer_uses_enum_value_not_str_enum_representation(tmp_path):
 def test_writer_formats_absolute_two_decimals(tmp_path):
     path = tmp_path / "out.csv"
     CanonicalCsvWriter().write([_tx(amount="900")], path)
-    assert path.read_text(encoding="utf-8-sig").splitlines()[1].split(",")[2] == "900.00"
+    assert path.read_text(encoding="utf-8-sig").splitlines()[1].split(",")[3] == "900.00"
 
 
 def test_writer_returns_zero_for_empty_iterable(tmp_path):
     path = tmp_path / "empty.csv"
     assert CanonicalCsvWriter().write([], path) == 0
     assert path.read_text(encoding="utf-8-sig").splitlines() == [
-        "date,merchant,amount,currency,category,type,comment,"
+        "account,date,merchant,amount,currency,category,type,comment,"
     ]
 
 
@@ -98,8 +98,8 @@ def test_writer_rejects_non_decimal_amount(tmp_path):
 def test_write_transactions_facade_and_header(tmp_path):
     path = tmp_path / "facade.csv"
     assert HEADER == [
-        "date", "merchant", "amount", "currency", "category", "type",
-        "comment", "",
+        "account", "date", "merchant", "amount", "currency", "category",
+        "type", "comment", "",
     ]
     assert write_transactions([_tx()], path) == 1
     assert path.read_bytes().startswith(codecs.BOM_UTF8)

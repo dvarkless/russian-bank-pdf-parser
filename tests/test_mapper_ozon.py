@@ -193,6 +193,26 @@ def test_ozon_preserves_order_currency_and_comments():
     assert {tx.comment for tx in txs} == {""}
 
 
+def test_ozon_account_falls_back_to_bank_name_without_reader():
+    tx = _mapper().map(
+        _doc([_row("Перевод собственных средств. Без НДС.", "+100,00")])
+    )[0]
+    assert tx.account == "ozon"
+
+
+def test_ozon_account_uses_reader_value():
+    mapper = OzonPdfMapper(
+        RussianDateParser(),
+        RussianAmountParser(),
+        currency="RUR",
+        account_reader=lambda path: "40817810200015168125",
+    )
+    tx = mapper.map(
+        _doc([_row("Перевод собственных средств. Без НДС.", "+100,00")])
+    )[0]
+    assert tx.account == "40817810200015168125"
+
+
 @pytest.mark.skipif(
     not Path("data/input/ozon_2026.pdf").exists(),
     reason="real 2026 Ozon fixture is not present",
@@ -208,12 +228,12 @@ def test_ozon_2026_real_fixture_converts_all_operations(tmp_path):
 
     rows = list(csv.reader(output.open(encoding="utf-8-sig")))
     assert len(rows) - 1 == 734
-    assert all(row[4] for row in rows[1:])
+    assert all(row[5] for row in rows[1:])
     credits = sum(
-        Decimal(row[2]) for row in rows[1:] if row[5] == "Пополнение"
+        Decimal(row[3]) for row in rows[1:] if row[6] == "Пополнение"
     )
     debits = sum(
-        Decimal(row[2]) for row in rows[1:] if row[5] == "Списание"
+        Decimal(row[3]) for row in rows[1:] if row[6] == "Списание"
     )
     assert credits == Decimal("1793473.90")
     assert debits == Decimal("1793438.90")

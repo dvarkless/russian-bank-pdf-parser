@@ -88,4 +88,8 @@ class SberCsvAdapter(BankAdapter):
 
     def create_mapper(self) -> RowMapper:
         """Return the shared T-Bank/Sber CSV mapper with injected parsers."""
-        return TbankCsvMapper(self._deps.date_parser, self._deps.amount_parser)
+        return TbankCsvMapper(
+            self._deps.date_parser,
+            self._deps.amount_parser,
+            account_fallback="sber-csv",
+        )
