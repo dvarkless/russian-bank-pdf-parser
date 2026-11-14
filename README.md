@@ -1,4 +1,4 @@
-# bank-parser 1.0.1
+# bank-parser 1.1.0
 
 [English version](README.en.md) | **Русская версия**
 
@@ -33,6 +33,11 @@
   и тонкие пробелы в тысячах, символы валют.
 - Автоопределение банка по имени файла или сигнатуре содержимого (заголовок
   CSV / текст первой страницы PDF); можно указать банк явно через `--bank`.
+- Флаг `--detect-bank` печатает определённое каноническое имя банка (например,
+  `tbank`, `sber-csv`) и завершается, ничего не записывая.
+- `-o` необязателен: если он не задан, файл пишется в текущий каталог под именем
+  `{банк}_{ГГГГММДД_ЧЧММСС}.csv` (например, `tbank_20261114_125302.csv`).
+- Автодополнение для bash и zsh через `--completion`.
 - Понятные ошибки с указанием файла, страницы и номера строки.
 
 ---
@@ -169,6 +174,17 @@ python3 -m venv .venv
 .venv/bin/bank-parser -i data/input/T-Банк.csv -o out.csv
 ```
 
+```bash
+# Только определить банк (без записи CSV)
+.venv/bin/bank-parser -i data/input/T-Банк.csv --detect-bank
+
+# Без -o: файл создаётся в текущем каталоге как {банк}_{ГГГГММДД_ЧЧММСС}.csv
+.venv/bin/bank-parser -i data/input/T-Банк.csv
+
+# Автодополнение для bash (добавьте в ~/.bashrc); для zsh укажите "zsh"
+eval "$(bank-parser --completion bash)"
+```
+
 Установленная точка входа: `bank-parser = bank_parser.cli:main`.
 
 ### Запуск из исходников без установки
@@ -194,6 +210,14 @@ PYTHONPATH=src .venv/bin/python -m bank_parser \
 
 - При успехе печатается строка `N transactions -> PATH`, код возврата `0`.
 - При ошибке печатается понятное сообщение в stderr, код возврата ненулевой.
+- `--detect-bank` печатает каноническое имя банка (например, `sber-csv`) и
+  возвращает код `0`, не читая строки и не записывая файл. Опция несовместима с
+  `--bank` (взаимоисключающие).
+- Если `-o` не указан, выходной файл получает имя
+  `{банк}_{ГГГГММДД_ЧЧММСС}.csv` в текущем каталоге (например,
+  `tbank_20261114_125302.csv`).
+- `--completion bash|zsh` печатает скрипт автодополнения и завершается с кодом
+  `0`.
 - `--version` печатает версию пакета, `--help` — справку.
 - Каталог для выходного файла должен существовать: writer его не создаёт.
 
@@ -212,6 +236,7 @@ src/bank_parser/
     __init__.py             # публичный API, версия, NullHandler
     __main__.py             # python -m bank_parser
     cli.py                  # argparse и composition root
+    completion.py           # скрипты автодополнения bash/zsh
     application.py          # фасад Application (convert/read)
     pipeline.py             # StatementPipeline (Template Method, CSV/PDF)
     registry.py             # BankRegistry, фабрики Source/Pipeline/Adapter

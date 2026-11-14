@@ -1,4 +1,4 @@
-# bank-parser 1.0.1
+# bank-parser 1.1.0
 
 **English** | [Русская версия](README.md)
 
@@ -33,6 +33,11 @@ strategy). The output is byte-for-byte deterministic for a given input.
   thousands separators, optional currency symbols.
 - Bank auto-detection from the filename or a content signature (header/body
   text), with an explicit `--bank` override.
+- A `--detect-bank` flag that prints the detected canonical bank name (e.g.
+  `tbank`, `sber-csv`) and exits without writing anything.
+- `-o` is optional: when omitted, the file is written in the current directory
+  as `{bank}_{YYYYMMDD_HHMMSS}.csv` (e.g. `tbank_20261114_125302.csv`).
+- Bash and zsh tab completion via `--completion`.
 - Clear error messages that name the offending data row.
 
 ---
@@ -180,6 +185,17 @@ For the test suite, install the development extra as well:
 .venv/bin/bank-parser -i data/input/T-Банк.csv -o out.csv
 ```
 
+```bash
+# Detect the bank only (no CSV written)
+.venv/bin/bank-parser -i data/input/T-Банк.csv --detect-bank
+
+# Omit -o: output is written in the current directory as {bank}_{YYYYMMDD_HHMMSS}.csv
+.venv/bin/bank-parser -i data/input/T-Банк.csv
+
+# Enable bash completion (add to ~/.bashrc); use "zsh" for zsh
+eval "$(bank-parser --completion bash)"
+```
+
 The installed entry point is `bank-parser = bank_parser.cli:main`.
 
 ### Run from the source tree without installing
@@ -208,6 +224,13 @@ header is ambiguous between T-Bank and Sber CSV:
 - On success the tool prints a one-line summary (`N transactions -> PATH`) and
   exits `0`.
 - On failure it prints a clear message to stderr and exits non-zero.
+- `--detect-bank` prints the canonical bank name (e.g. `sber-csv`) and exits `0`
+  without reading rows or writing a file. It is mutually exclusive with
+  `--bank`.
+- When `-o` is omitted, the output file is named
+  `{bank}_{YYYYMMDD_HHMMSS}.csv` in the current directory (e.g.
+  `tbank_20261114_125302.csv`).
+- `--completion bash|zsh` prints a shell completion script and exits `0`.
 - `--version` prints the package version.
 
 ---
@@ -225,6 +248,7 @@ src/bank_parser/
     __init__.py             # public API re-exports + version + NullHandler
     __main__.py             # python -m bank_parser entry point
     cli.py                  # argparse + composition root
+    completion.py           # bash/zsh completion-script generator
     application.py          # Application use-case facade (convert/read)
     pipeline.py             # StatementPipeline Template Method (CSV/PDF)
     registry.py             # BankRegistry, Source/Pipeline/Adapter factories
