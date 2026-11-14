@@ -1,4 +1,4 @@
-# bank-parser 1.2.0
+# bank-parser 1.3.0
 
 [English version](README.en.md) | **Русская версия**
 
@@ -34,7 +34,7 @@
 - Автоопределение банка по имени файла или сигнатуре содержимого (заголовок
   CSV / текст первой страницы PDF); можно указать банк явно через `--bank`.
 - Флаг `--detect-bank` печатает определённое каноническое имя банка (например,
-  `tbank`, `sber-csv`) и завершается, ничего не записывая.
+  `tbank`, `sber`) и завершается, ничего не записывая.
 - `-o` необязателен: если он не задан, файл пишется в текущий каталог под именем
   `{банк}_{ГГГГММДД_ЧЧММСС}.csv` (например, `tbank_20261114_125302.csv`).
 - Автодополнение для bash и zsh через `--completion`.
@@ -46,34 +46,32 @@
 
 | Банк | Вход | Имя адаптера | Строк в фикстуре | Статус |
 |---|---|---|---|---|
-| T-Bank | CSV-выписка, 17 колонок | `tbank` | 117 | Поддержан |
-| Сбер | CSV-выписка, 17 колонок | `sber-csv` | 16 | Поддержан |
+| T-Bank | CSV-выписка, 17 колонок (включая Сбер CSV) | `tbank` | 117 | Поддержан |
 | Альфа-Банк | CSV-выписка, 16 английских колонок | `alfa` | 96 | Поддержан |
-| Сбер | PDF-выписка | `sber-pdf` | 50 | Поддержан |
+| Сбер | PDF-выписка | `sber` | 50 | Поддержан |
 | Ozon | PDF-выписка | `ozon` | 47 | Поддержан |
 
-Все пять файлов из `data/input/` поддерживаются.
+Все пять файлов из `data/input/` поддерживаются; Сбер CSV (17 колонок, как у T-Bank) обрабатывается адаптером `tbank`.
 
 Псевдонимы для `--bank` (регистр не важен):
 
 | Банк | Псевдонимы |
 |---|---|
 | T-Bank | `tbank`, `t-bank`, `т-банк`, `т банк` |
-| Сбер | `sber-csv`, `sber-pdf`, `sber`, `сбер`, `сбербанк` |
+| Сбер | `sber`, `сбер`, `сбербанк`, `sber-pdf` (обратная совместимость) |
 | Альфа-Банк | `alfa`, `alpha`, `альфа`, `альфа-банк` |
 | Ozon | `ozon`, `озон`, `ozon-bank` |
 
-Псевдонимы `сбер` / `sber` / `сбербанк` общие для CSV- и PDF-адаптеров Сбера:
-формат определяется по расширению файла (`.csv` → `sber-csv`,
-`.pdf` → `sber-pdf`).
+`sber` — каноническое имя PDF-адаптера Сбера; `sber-pdf` сохранён как алиас для
+обратной совместимости. CSV-выписки Сбера (17 колонок) обрабатываются
+адаптером `tbank`.
 
 ### Определение банка
 
 Банк определяется в таком порядке: имя файла (высокая уверенность), сигнатура
 содержимого (текст первой страницы PDF или заголовок CSV), затем слабые
-признаки. Если имя файла нейтральное, а заголовок CSV совпадает у T-Bank и
-Сбера (одинаковые 17 колонок), адаптер не угадывает: выбрасывается
-`DetectionError` с просьбой указать `--bank tbank` или `--bank sber-csv`.
+признаки. Нейтральный 17-колоночный русский CSV-заголовок (общий у T-Bank и
+Сбер CSV) разрешается в адаптер `tbank`.
 
 Добавление нового банка не меняет CLI и канонический writer — см.
 [Добавление адаптера банка](#добавление-адаптера-банка).
@@ -119,7 +117,7 @@ account,date,merchant,amount,currency,category,type,comment,
 `Номер карты`; Альфа — `cardName` → `accountName` → `accountNumber` →
 `cardNumber`; Сбер PDF — имя карты, затем номер счёта; Ozon PDF — номер лицевого
 счёта. Если имя и номер отсутствуют, подставляется каноническое имя банка
-(`tbank`, `sber-csv`, `alfa`, `sber-pdf`, `ozon`).
+(`tbank`, `alfa`, `sber`, `ozon`).
 
 **Сбер PDF.** Значения берутся из текста выписки: дата операции, категория и
 знаковая сумма — из строки-заголовка операции; merchant — из следующей строки
@@ -203,14 +201,13 @@ PYTHONPATH=src .venv/bin/python -m bank_parser \
     -o out.csv
 ```
 
-Если имя файла не содержит названия банка, укажите его явно. Общий 17-колоночный
-заголовок T-Bank и Сбера неоднозначен:
+Если имя файла не содержит названия банка, укажите его явно:
 
 ```bash
 .venv/bin/bank-parser -i data/input/T-Банк.csv   -o out.csv --bank tbank
-.venv/bin/bank-parser -i data/input/Сбер_csv.csv -o out.csv --bank sber-csv
+.venv/bin/bank-parser -i data/input/Сбер_csv.csv -o out.csv --bank tbank
 .venv/bin/bank-parser -i data/input/Альфа.CSV    -o out.csv --bank alfa
-.venv/bin/bank-parser -i data/input/Сбер.pdf     -o out.csv --bank sber-pdf
+.venv/bin/bank-parser -i data/input/Сбер.pdf     -o out.csv --bank sber
 .venv/bin/bank-parser -i data/input/Ozon.pdf     -o out.csv --bank ozon
 ```
 
@@ -218,7 +215,7 @@ PYTHONPATH=src .venv/bin/python -m bank_parser \
 
 - При успехе печатается строка `N transactions -> PATH`, код возврата `0`.
 - При ошибке печатается понятное сообщение в stderr, код возврата ненулевой.
-- `--detect-bank` печатает каноническое имя банка (например, `sber-csv`) и
+- `--detect-bank` печатает каноническое имя банка (например, `sber`) и
   возвращает код `0`, не читая строки и не записывая файл. Опция несовместима с
   `--bank` (взаимоисключающие).
 - Если `-o` не указан, выходной файл получает имя
@@ -275,7 +272,6 @@ src/bank_parser/
     banks/
         __init__.py         # BANK_ADAPTERS, build_registry(), фасады
         tbank_csv.py        # TbankCsvMapper + TbankCsvAdapter
-        sber_csv.py         # SberCsvAdapter (переиспользует TbankCsvMapper)
         alfa_csv.py         # AlfaCsvMapper + AlfaCsvAdapter
         sber_pdf.py         # SberPdfMapper + SberPdfAdapter (state machine)
         ozon_pdf.py         # OzonPdfMapper + OzonPdfAdapter (таблица + правила)
@@ -357,7 +353,7 @@ acquire → extract → normalize → map → validate → write
 
 Тесты лежат в [`tests/`](tests) и используют pytest с inline-данными и
 `tmp_path`; локальные файлы `data/` не требуются. Покрыты доменные значения и
-парсеры, CSV-ридеры/writer, нормализация/валидация, все пять мапперов банков,
+парсеры, CSV-ридеры/writer, нормализация/валидация, все мапперы банков,
 реестр/определение банка, конвейер/Application и CLI.
 
 ### Проверка на фикстурах
@@ -382,11 +378,11 @@ acquire → extract → normalize → map → validate → write
 
 | Фикстура | Строк | SHA-256 |
 |---|---|---|
-| `data/input/T-Банк.csv` | 117 | `070b791241d0a6f468a6b212d98caaabc14c6ef1c82fa9057e8b671cce045c08` |
-| `data/input/Сбер_csv.csv` | 16 | `c71b1c1a68c1e7ae9fae49983d4ba656def5e33a319f66acbe8c6b71aeb594f0` |
-| `data/input/Альфа.CSV` | 96 | `d8709a291b76d1e455bdb5a4a325797a06fcf68a218e02826b4aa71608edee49` |
-| `data/input/Сбер.pdf` | 50 | `aa3e267d4de1787eb7ac8f39913031ea07e057e1a6560a6765a3aa92d24bcf08` |
-| `data/input/Ozon.pdf` | 47 | `790e0f1edca10dc4ed80a5485579e6e716c762b30cf435d80f31de319a7c6df1` |
+| `data/input/T-Банк.csv` | 117 | `6d78ac7ea3b8ad47bcbaa98b2fadce5e5ac4821bb02dcaf1f9b3303afeb0a727` |
+| `data/input/Сбер_csv.csv` | 16 | `e55f1cade1c2145c7d66f191df74f2ff54af4d9b640563347f39bee745d79808` |
+| `data/input/Альфа.CSV` | 96 | `700b8aa0fddc9be01cd52b9227514d354eab1c007d6edd8b4310cac20747d68d` |
+| `data/input/Сбер.pdf` | 50 | `e581e211b50e98a9287f3b60b5939d344feff806b7d104e96e96667c505e7ace` |
+| `data/input/Ozon.pdf` | 47 | `cfae34a13d9b6c2a28ee75a8738138bceb26a11b6658534c7d5619208dbcf20a` |
 
 Коды возврата `verify.py`: `0` — успех, `1` — расхождение, `2` — ошибка harness.
 
@@ -394,11 +390,11 @@ acquire → extract → normalize → map → validate → write
 
 ## Ограничения и примечания
 
-- **Поддержаны адаптеры T-Bank CSV, Сбер CSV, Альфа-Банк CSV, Сбер PDF и
-  Ozon PDF.** Все пять файлов из `data/input/` преобразуются.
-- **Нейтральный 17-колоночный русский CSV неоднозначен.** У T-Bank и Сбера
-  одинаковый заголовок, поэтому файл без названия банка в имени нужно
-  обрабатывать с явным `--bank tbank` или `--bank sber-csv`.
+- **Поддержаны адаптеры T-Bank CSV (включая Сбер CSV), Альфа-Банк CSV,
+  Сбер PDF и Ozon PDF.** Все пять файлов из `data/input/` преобразуются.
+- **Нейтральный 17-колоночный русский CSV обрабатывается адаптером `tbank`.**
+  У T-Bank и Сбер CSV одинаковый заголовок, поэтому он не различает банки; оба
+  обрабатываются адаптером `tbank`.
 - **Рукописные эталоны — подсказка, а не побайтовая истина.** Файлы в
   `data/output/` набраны вручную и могут содержать ошибки. Генератор выдаёт
   чистый канонический результат; QA объясняет расхождения как опечатки

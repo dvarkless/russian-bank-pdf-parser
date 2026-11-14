@@ -82,7 +82,7 @@ def test_cli_version_exits_zero_and_prints_version(capsys):
         main(["--version"])
     assert excinfo.value.code == 0
     captured = capsys.readouterr()
-    assert "bank-parser 1.2.0" in captured.out
+    assert "bank-parser 1.3.0" in captured.out
 
 
 def test_cli_unknown_bank_exit_one_without_traceback(tmp_path, capsys):
