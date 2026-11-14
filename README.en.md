@@ -1,4 +1,4 @@
-# bank-parser 1.1.0
+# bank-parser 1.2.0
 
 **English** | [Русская версия](README.md)
 
@@ -101,17 +101,18 @@ Every output file is written in exactly this format:
 | Encoding        | UTF-8 **with BOM** (`utf-8-sig`)                                   |
 | Line endings    | `\n` (LF), no trailing whitespace, single final newline            |
 | Delimiter       | `,`                                                                |
-| Columns         | 8 fields, header row first                                         |
+| Columns         | 9 fields, header row first                                         |
 
-Header row (note the trailing comma: the 8th field is an always-empty
+Header row (note the trailing comma: the 9th field is an always-empty
 placeholder that matches the established template):
 
 ```text
-date,merchant,amount,currency,category,type,comment,
+account,date,merchant,amount,currency,category,type,comment,
 ```
 
 | Column     | Source / rule |
 |------------|---------------|
+| `account`  | Account/card name or number; per-bank priority: account/card name → account/card number → bank name |
 | `date`     | Operation date, `DD/MM/YYYY` (T-Bank/Sber `Дата операции`; Alfa `operationDate`, falling back to `transactionDate` only when it is blank) |
 | `merchant` | Description text (T-Bank/Sber `Описание`; Alfa `merchant`) |
 | `amount`   | **Absolute** value, exactly 2 decimal digits, `.` separator (T-Bank/Sber signed `Сумма операции`; Alfa positive `amount` with the sign taken from `type`) |
@@ -119,11 +120,18 @@ date,merchant,amount,currency,category,type,comment,
 | `category` | T-Bank/Sber `Категория по-умолчанию`, falling back to `Ваша категория`; Alfa `category` |
 | `type`     | `Списание` / `Пополнение` — derived from the signed amount for T-Bank/Sber and from the explicit `type` column for Alfa; zero amounts are `Списание` |
 | `comment`  | T-Bank/Sber `Сообщение`; Alfa `comment` (may be empty) |
-| (8th)      | Always empty (trailing comma) |
+| (9th)      | Always empty (trailing comma) |
 
 One data row is written per input transaction, in input order. Rows are not
 sorted, filtered, deduplicated, or dropped — not even by `Статус` /
 `Учёт в аналитике` (T-Bank/Sber) or `status` (Alfa).
+
+**Determining `account`.** The value follows a per-bank priority of account/card
+name → account/card number → bank name: T-Bank/Sber CSV use `Имя счёта` →
+`Номер карты`; Alfa uses `cardName` → `accountName` → `accountNumber` →
+`cardNumber`; Sber PDF uses the card name, then the account number; Ozon PDF
+uses the account number. When no name or number is present, the canonical bank
+name is used (`tbank`, `sber-csv`, `alfa`, `sber-pdf`, `ozon`).
 
 For the **Sber PDF** statement the values come from the line-oriented statement
 text: the operation date, category and signed amount from the operation header
